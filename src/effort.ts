@@ -113,15 +113,25 @@ export function fallbackKiroEffort(kiroModelId: string): KiroEffortConfig | unde
 }
 
 /**
- * The effort config for one model: the catalog schema wins, the known-model
- * fallback fills in only its absence.
+ * The effort config for one model: the catalog schema wins, and the
+ * known-model ladder fills in whenever the schema does not disclose one.
+ *
+ * The fallback must also cover a schema that is *present but silent*. A
+ * management catalog can publish `additionalModelRequestFields` without an
+ * effort enum (only `thinking` and `max_tokens`, for instance), and returning
+ * undefined there would omit `additionalModelRequestFields` from the request
+ * entirely. Claude models require that field — their effort travels as
+ * `output_config` — so the omission is rejected by the runtime instead of
+ * degrading to the model's default effort. A missing ladder therefore falls
+ * through to the shipped one rather than disabling effort.
+ *
  * @param schema - the authenticated schema, when available.
  * @param kiroModelId - the wire model id.
  * @returns the effort config, or undefined when nothing discloses a ladder.
  */
 export function getKiroEffortConfig(schema: unknown, kiroModelId: string): KiroEffortConfig | undefined {
-  if (schema !== undefined) return deriveKiroEffort(schema)
-  return fallbackKiroEffort(kiroModelId)
+  const derived = schema === undefined ? undefined : deriveKiroEffort(schema)
+  return derived ?? fallbackKiroEffort(kiroModelId)
 }
 
 /**

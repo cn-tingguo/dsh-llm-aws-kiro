@@ -50,6 +50,28 @@ describe('llm-kiro effort', () => {
     expect(deriveKiroEffort({ properties: { reasoning: { properties: { effort: { enum: [] } } } } })).toBeUndefined()
   })
 
+  it('falls back to the shipped ladder when a published schema omits effort', () => {
+    // A management catalog entry can carry additionalModelRequestFields with
+    // only thinking/max_tokens and no effort enum. Returning undefined here
+    // would drop additionalModelRequestFields from the request, which the
+    // runtime rejects for Claude models, so the shipped ladder must apply.
+    const silent = { properties: { thinking: { type: 'object' }, max_tokens: { type: 'number' } } }
+    expect(deriveKiroEffort(silent)).toBeUndefined()
+    expect(getKiroEffortConfig(silent, 'claude-opus-5.5')).toEqual({
+      field: 'output_config',
+      values: ['low', 'medium', 'high', 'xhigh', 'max'],
+      summarizedThinking: true,
+    })
+    expect(getKiroEffortConfig({}, 'gpt-5.6-sol')).toMatchObject({ field: 'reasoning' })
+    // A model with no shipped ladder still yields nothing, unchanged.
+    expect(getKiroEffortConfig(silent, 'auto')).toBeUndefined()
+    // A schema that does disclose a ladder keeps winning over the fallback.
+    expect(getKiroEffortConfig(
+      { properties: { output_config: { properties: { effort: { enum: ['low', 'high'] } } } } },
+      'claude-opus-5.5',
+    )).toMatchObject({ values: ['low', 'high'] })
+  })
+
   it('maps harness effort onto the nearest wire rung and builds the request field', () => {
     const extended = fallbackKiroEffort('claude-opus-5.5')!
     expect(mapDshEffortToKiro('high', extended)).toBe('high')
