@@ -153,6 +153,17 @@ describe('llm-kiro adapter stream', () => {
     expect(body.additionalModelRequestFields).toBeUndefined()
   })
 
+  it('does not enable thinking for a model outside the served catalog', async () => {
+    // claude-opus-4-6 resolves to a known wire id but is not in this
+    // connection's explicit catalog, so the picker offered it only 'off'.
+    const server = await serverWith([{ kind: 'eventstream', events: textEvents }])
+    await collect(adapter().stream(request({ model: 'claude-opus-4-6', reasoningEffort: 'high' })))
+    const body = server.requests[0] as Record<string, unknown>
+    const current = (body.conversationState as Record<string, unknown>).currentMessage as Record<string, unknown>
+    expect((current.userInputMessage as Record<string, unknown>).content).not.toContain('<thinking_mode>')
+    expect(body.additionalModelRequestFields).toBeUndefined()
+  })
+
   it('recovers from a 403 with a rotated credential and retries once', async () => {
     const server = await serverWith([
       { kind: 'http-error', status: 403, body: 'Forbidden' },

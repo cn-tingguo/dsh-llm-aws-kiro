@@ -323,9 +323,12 @@ export class KiroAdapter extends LlmAdapter {
     const contextWindow = model?.contextWindow ?? connection.defaultContextWindow
     const effortConfig = kiroEffortFor(wireModelId, model?.additionalModelRequestFieldsSchema)
     const effectiveEffort: string = options.reasoningEffort ?? connection.reasoningEffort
+    // Only a catalog model that declares reasoning gets thinking markers. This
+    // matches reasoningInfo(), which offers an unknown model only 'off', so the
+    // request never enables what the picker did not offer.
     const thinkingEnabled = effectiveEffort !== 'off'
       && connection.thinking !== 'disabled'
-      && (model?.reasoning ?? true)
+      && model?.reasoning === true
 
     let system = options.system ?? ''
     if (thinkingEnabled) {
