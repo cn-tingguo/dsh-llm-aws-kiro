@@ -9,7 +9,7 @@
  * @module dsh-llm-kiro/kiro-cli
  */
 
-import { execFileSync, execSync } from 'node:child_process'
+import { execFile, execSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir, platform } from 'node:os'
@@ -362,14 +362,31 @@ export function saveKiroCliCredentials(creds: KiroCredentials, paths?: KiroStore
  * @returns the refreshed credential facts, or undefined when kiro-cli is not
  * installed or still holds nothing usable.
  */
-export function refreshViaKiroCli(paths?: KiroStorePaths): KiroCredentials | undefined {
+export async function refreshViaKiroCli(paths?: KiroStorePaths): Promise<KiroCredentials | undefined> {
   try {
-    execFileSync('kiro-cli', ['debug', 'refresh-auth-token'], {
-      timeout: 15000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
+    await runKiroCli(['debug', 'refresh-auth-token'], KIRO_CLI_REFRESH_TIMEOUT_MS)
     return getKiroCliCredentials(paths)
   } catch {
+    // kiro-cli missing, timed out, or failed: this layer has nothing to offer.
     return undefined
   }
+}
+
+/** Upper bound for the kiro-cli owned refresh. */
+export const KIRO_CLI_REFRESH_TIMEOUT_MS = 15_000
+
+/**
+ * Run one kiro-cli command without blocking the event loop. The refresh can
+ * take seconds, and a synchronous child would stall every other session the
+ * host is serving for that whole time.
+ * @param args - the kiro-cli arguments.
+ * @param timeoutMs - the kill deadline for the child.
+ */
+function runKiroCli(args: readonly string[], timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile('kiro-cli', [...args], { timeout: timeoutMs }, error => {
+      if (error) reject(error)
+      else resolve()
+    })
+  })
 }

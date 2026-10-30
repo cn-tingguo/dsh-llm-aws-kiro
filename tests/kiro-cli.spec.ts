@@ -14,14 +14,22 @@ import {
   getKiroIdeCredentials,
   queryKiroCliDb,
   execKiroCliDb,
+  KIRO_CLI_REFRESH_TIMEOUT_MS,
   refreshViaKiroCli,
   saveKiroCliCredentials,
   tryKiroCliToken,
 } from '../src/kiro-cli.ts'
 
-const { execFileSyncMock } = vi.hoisted(() => ({ execFileSyncMock: vi.fn() }))
+const { execFileMock } = vi.hoisted(() => ({ execFileMock: vi.fn() }))
 
-vi.mock('node:child_process', () => ({ execFileSync: execFileSyncMock }))
+vi.mock('node:child_process', () => ({ execFile: execFileMock }))
+
+/** Make the mocked kiro-cli child finish with the given error, or succeed. */
+function kiroCliExits(error?: Error): void {
+  execFileMock.mockImplementation((_file: string, _args: string[], _options: unknown, callback: (error: Error | null) => void) => {
+    callback(error ?? null)
+  })
+}
 
 let root: string | undefined
 
@@ -206,14 +214,33 @@ describe('llm-kiro kiro-cli store', () => {
   })
 
   it('refreshes via kiro-cli when available and returns nothing when it is not', async () => {
-    execFileSyncMock.mockImplementation(() => {
-      throw new Error('ENOENT')
-    })
-    expect(refreshViaKiroCli()).toBeUndefined()
+    kiroCliExits(new Error('ENOENT'))
+    expect(await refreshViaKiroCli()).toBeUndefined()
     const { dbPath } = await fixtureDb()
     insertToken(new DatabaseSync(dbPath), 'kirocli:odic:token', idcToken(new Date(Date.now() + 3600_000).toISOString()))
-    execFileSyncMock.mockImplementation(() => undefined as never)
-    expect(refreshViaKiroCli({ dbPath })).toMatchObject({ access: 'idc-access' })
+    kiroCliExits()
+    expect(await refreshViaKiroCli({ dbPath })).toMatchObject({ access: 'idc-access' })
+    const [file, args, options] = execFileMock.mock.calls[1] as [string, string[], { timeout: number }]
+    expect(file).toBe('kiro-cli')
+    expect(args).toEqual(['debug', 'refresh-auth-token'])
+    expect(options.timeout).toBe(KIRO_CLI_REFRESH_TIMEOUT_MS)
+  })
+
+  it('runs the kiro-cli refresh without blocking the event loop', async () => {
+    let finish: ((error: Error | null) => void) | undefined
+    execFileMock.mockImplementation((_file: string, _args: string[], _options: unknown, callback: (error: Error | null) => void) => {
+      finish = callback
+    })
+    let settled = false
+    const pending = refreshViaKiroCli().then(value => {
+      settled = true
+      return value
+    })
+    // While the child is still running, other work on the loop proceeds.
+    await new Promise(resolve => setImmediate(resolve))
+    expect(settled).toBe(false)
+    finish?.(new Error('exit 1'))
+    expect(await pending).toBeUndefined()
   })
 
   it('write-back only touches keys that already exist', async () => {

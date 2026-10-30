@@ -10,9 +10,16 @@ import { DatabaseSync } from 'node:sqlite'
 import { KIRO_DESKTOP_REFRESH_URL, REFRESH_TIMEOUT_MS, recoverKiroCredential, refreshKiroToken, resolveUsableKiroCredential } from '../src/refresh.ts'
 import type { KiroCredentials } from '../src/types.ts'
 
-const { execFileSyncMock } = vi.hoisted(() => ({ execFileSyncMock: vi.fn() }))
+const { execFileMock } = vi.hoisted(() => ({ execFileMock: vi.fn() }))
 
-vi.mock('node:child_process', () => ({ execFileSync: execFileSyncMock }))
+vi.mock('node:child_process', () => ({ execFile: execFileMock }))
+
+/** Make the mocked kiro-cli child fail as if it were missing. */
+function kiroCliMissing(): void {
+  execFileMock.mockImplementation((_file: string, _args: string[], _options: unknown, callback: (error: Error | null) => void) => {
+    callback(new Error('kiro-cli missing'))
+  })
+}
 
 const idcCreds: KiroCredentials = {
   access: 'expired-access',
@@ -222,9 +229,7 @@ describe('llm-kiro refresh', () => {
       region: 'us-east-1',
     }))
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })))
-    execFileSyncMock.mockImplementation(() => {
-      throw new Error('kiro-cli missing')
-    })
+    kiroCliMissing()
     expect(await resolveUsableKiroCredential(isolated(dbPath, ssoCacheDir))).toBeUndefined()
   })
 
@@ -266,18 +271,14 @@ describe('llm-kiro refresh', () => {
   it('returns undefined when nothing can recover', async () => {
     const { dbPath, ssoCacheDir } = await fixtureStore()
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })))
-    execFileSyncMock.mockImplementation(() => {
-      throw new Error('kiro-cli missing')
-    })
+    kiroCliMissing()
     const recovered = await recoverKiroCredential({ ...idcCreds, access: 'rejected-old' }, isolated(dbPath, ssoCacheDir), true)
     expect(recovered).toBeUndefined()
   })
 
   it('skips the kiro-cli layer when disallowed', async () => {
     const { dir } = await fixtureStore()
-    execFileSyncMock.mockImplementation(() => {
-      throw new Error('should not be called')
-    })
+    kiroCliMissing()
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })))
     const recovered = await recoverKiroCredential(
       desktopCreds,
@@ -285,6 +286,6 @@ describe('llm-kiro refresh', () => {
       false,
     )
     expect(recovered).toBeUndefined()
-    expect(execFileSyncMock).not.toHaveBeenCalled()
+    expect(execFileMock).not.toHaveBeenCalled()
   })
 })
