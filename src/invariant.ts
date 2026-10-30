@@ -1,13 +1,13 @@
 /**
- * Package-owned invariant companion for `@joshryandavis/dsh-llm-kiro`.
- * @module @joshryandavis/dsh-llm-kiro/invariant
+ * Package-owned invariant companion for `dsh-llm-kiro-local`.
+ * @module dsh-llm-kiro-local/invariant
  */
 
 /* jscpd:ignore-start */
 import type { Context } from '@deepseek-ai/cordis'
 import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 
-const PACKAGE_NAME = '@joshryandavis/dsh-llm-kiro'
+const PACKAGE_NAME = 'dsh-llm-kiro-local'
 
 /** Cordis companion plugin name. */
 export const name = 'llm-kiro-invariant'

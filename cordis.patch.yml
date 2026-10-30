@@ -2,7 +2,7 @@
 # over the profile root. Everything the plugin needs at runtime — the harness
 # seam packages (dsh-llm, settings, credentials, ...) — is already mounted by
 # the base bundle; credentials, token refresh, the Kiro backend, and the model
-# catalog live in @joshryandavis/dsh-llm-kiro.
+# catalog live in dsh-llm-kiro-local.
 - insert:
     - id: llm-kiro
-      name: '@joshryandavis/dsh-llm-kiro'
+      name: 'dsh-llm-kiro-local'

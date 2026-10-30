@@ -8,7 +8,7 @@
  * changed region, catalog, or credential reaches the very next request
  * without restarting anything, while an in-flight stream keeps the facts it
  * started with.
- * @module @joshryandavis/dsh-llm-kiro
+ * @module dsh-llm-kiro-local
  */
 
 import type { Context } from '@deepseek-ai/cordis'
