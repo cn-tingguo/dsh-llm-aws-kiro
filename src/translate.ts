@@ -10,6 +10,9 @@ import { ToolCallId, EMPTY_RESPONSE_CODE, LlmError } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, FinishReason, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { KiroStreamEvent } from './types.ts'
 
+/** Rough characters-per-token ratio for estimating output usage the runtime does not report. */
+export const CHARS_PER_TOKEN = 4
+
 /** One open block under assembly. */
 interface OpenBlock {
   index: number
@@ -84,9 +87,12 @@ export async function* translate(events: AsyncIterable<KiroStreamEvent>, context
 
   /** Finish this stream with the given reason. */
   function* finish(reason: FinishReason): Generator<StreamChunk> {
+    // The runtime's usage event arrives empty in practice, so a missing output
+    // count is estimated from what this stream emitted instead of reported as 0.
+    const emittedChars = order.reduce((total, block) => total + block.text.length, 0)
     const usage: TokenUsage = {
       inputTokens: usageEvent?.inputTokens ?? Math.round((contextUsagePercentage ?? 0) / 100 * contextWindow),
-      outputTokens: usageEvent?.outputTokens ?? 0,
+      outputTokens: usageEvent?.outputTokens ?? Math.ceil(emittedChars / CHARS_PER_TOKEN),
     }
     yield { type: 'usage', usage }
     yield { type: 'finish', reason }

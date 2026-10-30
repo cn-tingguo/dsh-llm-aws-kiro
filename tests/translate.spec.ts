@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { EMPTY_RESPONSE_CODE } from '@deepseek-ai/dsh-llm'
-import { translate } from '../src/translate.ts'
+import { CHARS_PER_TOKEN, translate } from '../src/translate.ts'
 import type { KiroStreamEvent } from '../src/types.ts'
 
 async function collect(events: KiroStreamEvent[], contextWindow = 200_000) {
@@ -23,6 +23,17 @@ describe('llm-kiro translate', () => {
     expect(chunks).toContainEqual({ type: 'block-end', index: 0, block: { type: 'text', text: 'hello world' } })
     expect(chunks).toContainEqual({ type: 'usage', usage: { inputTokens: 24, outputTokens: 2 } })
     expect(chunks).toContainEqual({ type: 'finish', reason: { kind: 'stop' } })
+  })
+
+  it('estimates output tokens from emitted text when the usage event is empty', async () => {
+    // The live runtime sends `usage: {}`; reporting 0 output tokens would be wrong.
+    const chunks = await collect([
+      { type: 'contextUsage', data: { contextUsagePercentage: 1 } },
+      { type: 'content', data: 'hello' },
+      { type: 'content', data: ' world' },
+      { type: 'usage', data: {} },
+    ])
+    expect(chunks).toContainEqual({ type: 'usage', usage: { inputTokens: 2000, outputTokens: Math.ceil(11 / CHARS_PER_TOKEN) } })
   })
 
   it('skips repeated content heartbeats and dedupes consecutive identical deltas', async () => {
