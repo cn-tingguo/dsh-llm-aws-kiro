@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
-import { KIRO_DESKTOP_REFRESH_URL, recoverKiroCredential, refreshKiroToken, resolveUsableKiroCredential } from '../src/refresh.ts'
+import { KIRO_DESKTOP_REFRESH_URL, REFRESH_TIMEOUT_MS, recoverKiroCredential, refreshKiroToken, resolveUsableKiroCredential } from '../src/refresh.ts'
 import type { KiroCredentials } from '../src/types.ts'
 
 const { execFileSyncMock } = vi.hoisted(() => ({ execFileSyncMock: vi.fn() }))
@@ -109,6 +109,26 @@ describe('llm-kiro refresh', () => {
     await expect(refreshKiroToken(desktopCreds)).rejects.toThrow('missing accessToken')
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 200 })))
     await expect(refreshKiroToken(idcCreds)).rejects.toThrow('invalid_grant')
+  })
+
+  it('bounds both refresh transports so a hung auth endpoint fails instead of stalling', async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout')
+      .mockImplementation(() => AbortSignal.abort(new DOMException('refresh timed out', 'TimeoutError')))
+    // A fetch that never answers on its own; only the abort signal can end it.
+    const hangingFetch = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      const signal = init.signal
+      if (!signal) return
+      if (signal.aborted) reject(signal.reason)
+      else signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+    }))
+    vi.stubGlobal('fetch', hangingFetch)
+
+    await expect(refreshKiroToken(idcCreds)).rejects.toThrow('refresh timed out')
+    await expect(refreshKiroToken(desktopCreds)).rejects.toThrow('refresh timed out')
+    expect(hangingFetch).toHaveBeenCalledTimes(2)
+    for (const [, init] of hangingFetch.mock.calls) expect(init.signal).toBeInstanceOf(AbortSignal)
+    expect(timeoutSpy).toHaveBeenCalledTimes(2)
+    expect(timeoutSpy).toHaveBeenCalledWith(REFRESH_TIMEOUT_MS)
   })
 
   it('resolves a valid kiro-cli credential without network activity', async () => {

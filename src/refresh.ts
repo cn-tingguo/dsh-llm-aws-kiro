@@ -13,6 +13,13 @@ import { getKiroCliCredentials, getKiroCliCredentialsAllowExpired, getKiroIdeCre
 /** Refresh lead time subtracted from access-token expiry at refresh time. */
 const EXPIRES_BUFFER_MS = 5 * 60 * 1000
 
+/**
+ * Upper bound for one token-refresh round trip. Refresh runs on the request
+ * path, so a hung auth endpoint must fail and let the next layer try instead
+ * of stalling the conversation. Matches the management call budget.
+ */
+export const REFRESH_TIMEOUT_MS = 20_000
+
 /** Kiro desktop auth refresh endpoint template; {region} is the API region. */
 export const KIRO_DESKTOP_REFRESH_URL = 'https://prod.{region}.auth.desktop.kiro.dev/refreshToken'
 
@@ -57,6 +64,7 @@ export async function refreshKiroToken(credentials: KiroCredentials): Promise<Ki
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken }),
+      signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
     })
     if (!response.ok) throw new Error(`Kiro desktop token refresh failed: ${response.status}`)
     const data = (await response.json()) as DesktopRefreshResponse
@@ -79,6 +87,7 @@ export async function refreshKiroToken(credentials: KiroCredentials): Promise<Ki
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ clientId, clientSecret, refreshToken, grantType: 'refresh_token' }),
+    signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
   })
   if (!response.ok) throw new Error(`Kiro IDC token refresh failed: ${response.status}`)
   const data = (await response.json()) as OidcTokenResponse
