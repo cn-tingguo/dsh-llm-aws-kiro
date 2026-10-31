@@ -365,7 +365,7 @@ describe('llm-kiro adapter stream', () => {
     expect(body.additionalModelRequestFields).toMatchObject({ output_config: { effort: 'medium' } })
   })
 
-  it('shows the credit multiplier beside the model name, not inside it', async () => {
+  it('shows the credit multiplier with the model name', async () => {
     const models = await adapter({
       options: () => connection({
         region: 'us-east-1',
@@ -378,11 +378,12 @@ describe('llm-kiro adapter stream', () => {
       }),
     }).listModels('kiro')
     const byId = new Map(models.map(model => [model.id, model]))
-    // The name stays the catalog's own label; the cost rides in description.
-    expect(byId.get('glm-5')?.name).toBe('GLM 5')
+    // The composer renders only `name`, so the cost rides there.
+    expect(byId.get('glm-5')?.name).toBe('GLM 5 · 0.5x')
     expect(byId.get('glm-5')?.description).toBe('0.5x credit')
-    expect(byId.get('auto')?.description).toBe('1x credit')
+    expect(byId.get('auto')?.name).toBe('Auto · 1x')
     // An unpriced model gets no fabricated multiplier.
+    expect(byId.get('claude-sonnet-4')?.name).toBe('Claude Sonnet 4')
     expect(byId.get('claude-sonnet-4')?.description).toBeUndefined()
   })
 

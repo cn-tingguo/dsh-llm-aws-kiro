@@ -15,8 +15,7 @@
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json",
-    "./icon": "./icon.svg",
-    "./client": "./client/index.js"
+    "./icon": "./icon.svg"
   },
   "files": [
     "lib",
@@ -24,8 +23,7 @@
     "README.zh.md",
     "locale/*.json",
     "icon.svg",
-    "README.md",
-    "client/index.js"
+    "README.md"
   ],
   "scripts": {
     "build": "tsc -b tsconfig.build.json",
@@ -36,14 +34,6 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
-    },
-    "client": {
-      "inject": [
-        "@deepseek-ai/dsh-client-ui-model-selection",
-        "@deepseek-ai/dsh-client-ui-renderer",
-        "@deepseek-ai/dsh-client-locale"
-      ],
-      "platform": "web"
     }
   },
   "peerDependencies": {

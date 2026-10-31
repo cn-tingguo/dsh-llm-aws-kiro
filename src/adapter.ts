@@ -174,9 +174,10 @@ function modelInfo(provider: string, model: KiroModel): LlmModelInfo {
   return {
     provider,
     id: model.id,
-    name: model.name,
-    // The picker renders `description` beside the name, keeping the name itself
-    // the catalog's own label.
+    // The composer renders only `name` for a model without a Client-side label
+    // contribution, so the cost rides in the name itself. `description` still
+    // carries it for any surface that reads it.
+    name: cost === undefined ? model.name : `${model.name} · ${formatRateMultiplier(model.rateMultiplier as number)}x`,
     ...(cost !== undefined ? { description: cost } : {}),
     inputModalities: model.inputModalities,
   }
