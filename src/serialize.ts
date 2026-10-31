@@ -161,6 +161,23 @@ function toKiroToolResult(message: Extract<Message, { role: 'tool' }>): KiroTool
   }
 }
 
+/**
+ * Render one tool-registry change as plain text.
+ *
+ * The Kiro wire has no field for "a tool became available" or "a tool went
+ * away", so the change has to ride as content. Dropping it instead would leave
+ * the model believing the tool set never changed, and it would keep reaching
+ * for a removed tool or ignore a newly added one.
+ *
+ * @param block - one `tool-addition` or `tool-removal` block.
+ * @returns the line to append to the surrounding message content, or undefined.
+ */
+function toolRegistryNote(block: ContentBlock): string | undefined {
+  if (block.type === 'tool-addition') return `[tool now available: ${block.toolName}]`
+  if (block.type === 'tool-removal') return `[tool no longer available: ${block.toolName}]`
+  return undefined
+}
+
 /** Parse one tool call's raw JSON arguments; malformed model output degrades to an empty object. */
 function parseToolArguments(block: ToolCallBlock): Record<string, unknown> {
   try {
@@ -200,6 +217,14 @@ function toKiroAssistant(message: SerializableMessage): KiroAssistantResponseMes
         input: parseToolArguments(block),
       })
       armHadBlocks = true
+    } else {
+      // A tool-registry change is content the model must see; the wire has no
+      // dedicated field, so it becomes a line of text.
+      const note = toolRegistryNote(block)
+      if (note !== undefined) {
+        armContent = armContent ? `${armContent}\n${note}` : note
+        armHadBlocks = true
+      }
     }
   }
   if (!armContent && armToolUses.length === 0 && !armHadBlocks) return undefined

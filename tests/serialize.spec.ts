@@ -167,6 +167,31 @@ describe('llm-kiro serialize', () => {
     expect(body.conversationState.currentMessage.userInputMessage.content).toBe(EMPTY_CONTENT_PLACEHOLDER)
   })
 
+  it('carries tool-registry changes into the wire as readable content', () => {
+    // The wire has no field for a tool appearing or disappearing; dropping the
+    // block would leave the model believing the tool set never changed.
+    const body = serializeKiroRequest(request({
+      messages: [
+        user('start'),
+        {
+          role: 'developer',
+          id: 'm-dev' as never,
+          source: { kind: 'tool-registry' },
+          content: [
+            { type: 'tool-addition', toolName: 'create_worktree' },
+            { type: 'tool-removal', toolName: 'old_tool' },
+          ],
+        } as never,
+        user('go on'),
+      ],
+    }), 'glm-5', undefined, 200000)
+    const rendered = (body.conversationState.history ?? [])
+      .map(entry => entry.assistantResponseMessage?.content ?? entry.userInputMessage?.content ?? '')
+      .join('\n')
+    expect(rendered).toContain('[tool now available: create_worktree]')
+    expect(rendered).toContain('[tool no longer available: old_tool]')
+  })
+
   it('adds placeholder tool specs for tools referenced only in history', () => {
     const body = serializeKiroRequest(request({
       messages: [
