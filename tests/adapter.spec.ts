@@ -101,8 +101,12 @@ describe('llm-kiro adapter stream', () => {
     expect(chunks).toContainEqual({ type: 'finish', reason: { kind: 'stop' } })
     // The runtime's client-identity gate requires the SDK-shaped UA on both
     // headers; the harness attribution UA is rejected with 403.
-    expect(server.headers[0]?.['user-agent']).toMatch(/^aws-sdk-rust\/1\.0\.0 ua\/2\.1 os\/other lang\/js api\/codewhispererstreaming#1\.28\.3 m\/E app\/AmazonQ-For-CLI md\/appVersion-\S+$/)
-    expect(server.headers[0]?.['x-amz-user-agent']).toBe(server.headers[0]?.['user-agent'])
+    // The harness attribution must ride along (adapter contract), and the AWS
+    // prefix must stay verbatim: the backend rejects a user-agent without it.
+    const userAgent = server.headers[0]?.['user-agent'] ?? ''
+    expect(userAgent).toMatch(/^aws-sdk-rust\/1\.0\.0 ua\/2\.1 os\/other lang\/js api\/codewhispererstreaming#1\.28\.3 m\/E app\/AmazonQ-For-CLI md\/appVersion-\S+/)
+    expect(userAgent).toContain('deepseek-harness/')
+    expect(server.headers[0]?.['x-amz-user-agent']).toBe(userAgent)
     expect(server.headers[0]?.authorization).toBe('Bearer token-1')
     expect(server.headers[0]?.accept).toBe('application/vnd.amazon.eventstream')
     expect(server.headers[0]?.['x-amzn-codewhisperer-optout']).toBe('true')

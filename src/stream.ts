@@ -7,7 +7,7 @@
  * @module dsh-llm-kiro/stream
  */
 
-import { APP_IDENTITY, LlmError } from '@deepseek-ai/dsh-llm'
+import { APP_IDENTITY, LlmError, attributionHeaders } from '@deepseek-ai/dsh-llm'
 import { getKiroEndpoints } from './endpoints.ts'
 import { decodeKiroEventStream } from './eventstream.ts'
 import type { KiroCredentials, KiroRequest, KiroStreamEvent } from './types.ts'
@@ -80,9 +80,28 @@ function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
  * and `lang` segments are free-form; the product version rides along for
  * diagnostics. Verified against runtime.eu-central-1.kiro.dev 2026-08-21.
  */
+/**
+ * The `user-agent` this runtime accepts.
+ *
+ * The backend authorizes on the AWS SDK prefix, so it must stay verbatim:
+ * measured on 2.36, a `user-agent` without `aws-sdk-rust/... app/AmazonQ-For-CLI`
+ * is answered `403 User is not authorized to make this call`, and so is one
+ * whose `x-amz-user-agent` keeps the prefix while `user-agent` does not.
+ *
+ * The harness attribution is appended rather than substituted, which the same
+ * measurement accepts (`200`). That satisfies the adapter contract, which
+ * requires every provider request to carry {@link attributionHeaders}, without
+ * losing the prefix the backend checks.
+ *
+ * @returns the merged user-agent value.
+ */
 function kiroUserAgent(): string {
   const mid = crypto.randomUUID().replace(/-/g, '')
-  return `aws-sdk-rust/1.0.0 ua/2.1 os/other lang/js api/codewhispererstreaming#1.28.3 m/E app/AmazonQ-For-CLI md/appVersion-${APP_IDENTITY.version}-${mid}`
+  const awsPrefix = `aws-sdk-rust/1.0.0 ua/2.1 os/other lang/js api/codewhispererstreaming#1.28.3 m/E app/AmazonQ-For-CLI md/appVersion-${APP_IDENTITY.version}-${mid}`
+  // attributionHeaders() carries the harness identity in its own `user-agent`;
+  // merging it here keeps one header the backend already accepts.
+  const attribution = attributionHeaders()['user-agent']
+  return attribution === undefined ? awsPrefix : `${awsPrefix} ${attribution}`
 }
 
 /** Map a non-2xx runtime response to the harness failure code. */

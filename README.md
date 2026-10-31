@@ -22,8 +22,15 @@ harness itself.
 | **The backend** | Region/endpoint resolution (SSO region → Kiro API region), the management control plane (`List-Available-Profiles`, `List-Available-Models`, shared `~/.kiro-management-models-cache.json` catalog cache), and the runtime `generateAssistantResponse` call over the AWS event-stream protocol (Smithy framing via `@smithy/core`), with capacity backoff, first-token timeout, and the harness idle watchdog. |
 | **Models** | A bootstrap catalog mirroring the kiro-cli-verified menu (21 models with context windows, output caps, reasoning capability, image modality), exact wire-id resolution (dashed harness ids ⇄ dotted wire ids), and the authenticated management catalog, which refreshes the served metadata and appends models that shipped after the bootstrap list — reaching the model picker, not just the Models page. The picker lists `auto` first, then the rest by descending credit multiplier with the cost shown in the label; a model the authenticated catalog no longer lists is dropped instead of offered. The reasoning-effort picker offers `off` plus each model's own Kiro effort rungs from its authenticated effort schema (e.g. `low`/`medium`/`high`/`xhigh`/`max`), with the Kiro thinking markers on the system prompt. |
 
-Every runtime request carries the harness attribution `User-Agent` (from `@deepseek-ai/dsh-llm`
-`attributionHeaders()`) plus the AWS SDK-shaped `x-amz-user-agent` telemetry header the backend expects.
+Every runtime request carries the harness attribution inside `user-agent`, merged from
+`@deepseek-ai/dsh-llm` `attributionHeaders()` onto the AWS SDK prefix the backend authorizes on, and
+the same value as `x-amz-user-agent`.
+
+The merge is not cosmetic. Measured on kiro-cli 2.36: a `user-agent` without the
+`aws-sdk-rust/... app/AmazonQ-For-CLI` prefix is answered `403 User is not authorized to make this
+call`, and so is one whose `x-amz-user-agent` keeps the prefix while `user-agent` drops it. Appending
+the attribution to the prefix keeps both properties, so the adapter contract is satisfied without
+losing authorization.
 
 Settings section removed: harness 0.2.x projects a plugin's `Config` schema through `SettingsForms`
 itself, so the provider registers a configurable route on `ctx.llm` instead of installing its own

@@ -35,8 +35,13 @@ fork，已迁移到 harness 0.2.x 的消息模型和包线。本 fork 的改动�
   推理强度选择器提供 `off` 以及每个模型认证 effort schema 中的档位（如 `low`/`medium`/`high`/`xhigh`/`max`），
   并在系统提示上带上 Kiro 的思考标记。 |
 
-每个运行时请求都携带 harness 属性化的 `User-Agent`（来自 `@deepseek-ai/dsh-llm` 的
-`attributionHeaders()`），以及后端期望的 AWS SDK 风格的 `x-amz-user-agent` 遥测头。
+每个运行时请求都在 `user-agent` 中携带 harness 归属：由 `@deepseek-ai/dsh-llm` 的
+`attributionHeaders()` 合并到后端用于授权的 AWS SDK 前缀之上，`x-amz-user-agent` 取同一值。
+
+这个合并不是装饰。在 kiro-cli 2.36 上实测：`user-agent` 缺少
+`aws-sdk-rust/... app/AmazonQ-For-CLI` 前缀会被回以 `403 User is not authorized to make this
+call`；`x-amz-user-agent` 保留前缀而 `user-agent` 去掉它同样如此。把归属追加在前缀之后可以同时
+满足两个条件，因此既符合 adapter 契约，又不丢失授权。
 
 harness 0.2.x 由 `SettingsForms` 自行投射插件的 `Config` schema，因此本提供方在 `ctx.llm` 上注册可配置
 路由，不再自行安装设置区。插件配置仍来自它的 `cordis.patch.yml` 条目。
