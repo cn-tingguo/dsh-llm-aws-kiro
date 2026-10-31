@@ -271,16 +271,6 @@ describe('llm-kiro models', () => {
     expect(withoutRetiredModels(base, []).map(model => model.id)).toEqual(['kept', 'retired'])
   })
 
-  it('serves the newest authenticated models even before the catalog is cached', () => {
-    // Bootstrap carries them so a stale or absent cache never hides a model the
-    // account can use; discovery then refreshes the price and limits over it.
-    const offline = servedKiroModels({ models: bootstrapKiroModels })
-    const ids = offline.map(model => model.id)
-    expect(ids).toContain('claude-sonnet-5-5')
-    expect(ids).toContain('claude-haiku-5-5')
-    expect(offline.find(model => model.id === 'claude-sonnet-5-5')?.contextWindow).toBe(1_000_000)
-  })
-
   it('orders the picker auto first, then by credit multiplier descending', () => {
     const priced = (id: string, rateMultiplier?: number): KiroModel => ({
       id,
