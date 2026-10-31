@@ -216,6 +216,11 @@ Measured on kiro-cli 2.36.0, not assumed:
   instead of stalling the turn.
 - **Retired models are dropped, not offered.** An entry the authenticated catalog no longer lists is
   removed once a catalog has been read; with no catalog yet, nothing is treated as retired.
+- **File attachments need no handling here.** `LlmRuntime` projects every `file` block to handle text
+  before dispatching to any adapter (`projectFilesToText`), so this adapter never sees one: the model
+  receives the saved read-only path and reads it with its own file tools. Only blocks the runtime
+  leaves untouched reach serialization — which is why `tool-addition` and `tool-removal` are handled
+  explicitly, and `file` is not.
 
 ## License
 
