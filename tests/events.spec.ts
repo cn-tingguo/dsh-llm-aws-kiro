@@ -36,6 +36,12 @@ describe('llm-kiro event parsing', () => {
       data: { inputTokens: 4, outputTokens: 2 },
     })
     expect(parseKiroEvent({ usage: {} })).toEqual({ type: 'usage', data: {} })
+    // The metering event sends the credit amount as a bare number; reading
+    // `.inputTokens` off it used to drop the one value the runtime reports.
+    expect(parseKiroEvent({ unit: 'credit', usage: 0.0053 })).toEqual({
+      type: 'usage',
+      data: { credits: 0.0053 },
+    })
   })
 
   it('classifies error events in both spellings', () => {

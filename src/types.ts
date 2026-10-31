@@ -123,7 +123,7 @@ export type KiroStreamEvent =
   | { type: 'toolUseStop'; data: { stop: boolean } }
   | { type: 'contextUsage'; data: { contextUsagePercentage: number } }
   | { type: 'followupPrompt'; data: string }
-  | { type: 'usage'; data: { inputTokens?: number; outputTokens?: number } }
+  | { type: 'usage'; data: { inputTokens?: number; outputTokens?: number; credits?: number } }
   | { type: 'error'; data: { error: string; message?: string } }
 
 /** One model entry of the authenticated management catalog. */

@@ -59,12 +59,20 @@ export function parseKiroEvent(parsed: Record<string, unknown>): KiroStreamEvent
     }
   }
   if (parsed.usage !== undefined) {
+    // The runtime multiplexes two shapes onto `usage`. The metering event sends
+    // `{ unit: 'credit', usage: <number> }`, so `parsed.usage` is the credit
+    // amount itself; an older token shape would send `{ inputTokens, outputTokens }`.
+    // Reading `.inputTokens` off the number silently yielded an empty event and
+    // dropped the one measured value the runtime does report.
+    if (typeof parsed.usage === 'number') {
+      return { type: 'usage', data: { credits: parsed.usage } }
+    }
     const u = parsed.usage as Record<string, unknown>
     return {
       type: 'usage',
       data: {
-        ...(u.inputTokens !== undefined ? { inputTokens: u.inputTokens as number } : {}),
-        ...(u.outputTokens !== undefined ? { outputTokens: u.outputTokens as number } : {}),
+        ...(typeof u.inputTokens === 'number' ? { inputTokens: u.inputTokens } : {}),
+        ...(typeof u.outputTokens === 'number' ? { outputTokens: u.outputTokens } : {}),
       },
     }
   }

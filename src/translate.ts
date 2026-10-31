@@ -55,7 +55,7 @@ export async function* translate(events: AsyncIterable<KiroStreamEvent>, context
   let emittedToolCalls = 0
   let sawAnyToolCalls = false
   let contextUsagePercentage: number | undefined
-  let usageEvent: { inputTokens?: number; outputTokens?: number } | undefined
+  let usageEvent: { inputTokens?: number; outputTokens?: number; credits?: number } | undefined
   let lastContentData: string | undefined
 
   const open = (kind: OpenBlock['kind']): OpenBlock => {
