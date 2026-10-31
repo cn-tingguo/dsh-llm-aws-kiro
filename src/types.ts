@@ -136,6 +136,8 @@ export interface KiroCatalogModel {
     [key: string]: unknown
   }
   additionalModelRequestFieldsSchema?: Record<string, unknown> | null
+  /** Relative credit cost of this model; the catalog's ordering signal. */
+  rateMultiplier?: number | null
   [key: string]: unknown
 }
 

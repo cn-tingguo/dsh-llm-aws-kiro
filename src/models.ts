@@ -43,7 +43,15 @@ export interface KiroModel {
   firstTokenTimeoutMs?: number
   /** Authenticated effort schema, when the catalog disclosed one. */
   additionalModelRequestFieldsSchema?: Record<string, unknown>
+  /**
+   * Relative credit cost reported by the catalog. The picker orders by it so
+   * the cheapest models come first; absent values sort last.
+   */
+  rateMultiplier?: number
 }
+
+/** The model Kiro dispatches for the caller; the picker keeps it first. */
+export const AUTO_MODEL_ID = 'auto'
 
 /** Default context capacity when the catalog discloses none. */
 export const DEFAULT_CONTEXT_WINDOW = 200_000
@@ -90,6 +98,35 @@ export const bootstrapKiroModels: readonly KiroModel[] = BOOTSTRAP.map(model => 
 
 /** Known wire model ids: the bootstrap set, extended by discovery. */
 export const KIRO_MODEL_IDS = new Set(bootstrapKiroModels.map(model => model.kiroModelId))
+
+/**
+ * Order the picker: `auto` first, then cheapest first by credit multiplier.
+ *
+ * The catalog reports a relative credit cost per model but no rank, so this is
+ * the only ordering signal that reflects what a choice actually costs. A model
+ * whose entry the catalog did not price sorts after every priced one; models
+ * that tie keep the catalog order.
+ *
+ * @param models - the served catalog in catalog order.
+ * @returns a new array in picker order.
+ */
+export function orderKiroModels(models: readonly KiroModel[]): KiroModel[] {
+  const priced = (model: KiroModel): number =>
+    model.rateMultiplier !== undefined && Number.isFinite(model.rateMultiplier)
+      ? model.rateMultiplier
+      : Number.POSITIVE_INFINITY
+  return models
+    .map((model, index) => ({ model, index }))
+    .sort((left, right) => {
+      const leftAuto = left.model.id === AUTO_MODEL_ID ? 0 : 1
+      const rightAuto = right.model.id === AUTO_MODEL_ID ? 0 : 1
+      if (leftAuto !== rightAuto) return leftAuto - rightAuto
+      const byPrice = priced(left.model) - priced(right.model)
+      if (byPrice !== 0) return byPrice
+      return left.index - right.index
+    })
+    .map(entry => entry.model)
+}
 
 /** Convert a wire model id (claude-sonnet-4.6) to the harness id (claude-sonnet-4-6). */
 export function toHarnessModelId(kiroModelId: string): string {
@@ -177,6 +214,9 @@ export function mapKiroCatalogModels(catalogModels: KiroCatalogModel[], region: 
       maxTokens: maxOutputTokens ?? DEFAULT_MAX_TOKENS,
       ...(existing?.firstTokenTimeoutMs ? { firstTokenTimeoutMs: existing.firstTokenTimeoutMs } : {}),
       ...(schema ? { additionalModelRequestFieldsSchema: schema } : {}),
+      ...(typeof catalogModel.rateMultiplier === 'number' && Number.isFinite(catalogModel.rateMultiplier)
+        ? { rateMultiplier: catalogModel.rateMultiplier }
+        : {}),
     }
   })
 }
@@ -246,7 +286,10 @@ export interface KiroModelSource {
  */
 export function servedKiroModels(source: KiroModelSource): readonly KiroModel[] {
   if (source.discoverModels !== true) return source.models
-  return mergeKiroModels(source.models, getCachedModels(resolveApiRegion(source.region)))
+  // Discovery merges the authenticated catalog in; that is where multipliers
+  // come from, so the picker order is applied to the merged list only. An
+  // explicit list keeps the order its author chose.
+  return orderKiroModels(mergeKiroModels(source.models, getCachedModels(resolveApiRegion(source.region))))
 }
 
 /**

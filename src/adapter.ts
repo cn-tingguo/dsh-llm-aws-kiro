@@ -149,11 +149,32 @@ function imageBlocks(blocks: readonly ContentBlock[]): ImageBlock[] {
   return blocks.filter((block): block is ImageBlock => block.type === 'image')
 }
 
+/**
+ * Selector label for one model: the catalog name plus its relative credit
+ * cost, so a reader can weigh a choice without consulting another surface.
+ *
+ * The multiplier is the catalog's own unit ("2.2x credit"); a model the
+ * catalog did not price keeps the bare name rather than showing a fake 1x.
+ *
+ * @param model - the served catalog entry.
+ * @returns the label shown in the model picker.
+ */
+function modelLabel(model: KiroModel): string {
+  const rate = model.rateMultiplier
+  if (rate === undefined || !Number.isFinite(rate)) return model.name
+  return `${model.name} · ${formatRateMultiplier(rate)}x`
+}
+
+/** Render a multiplier without trailing zeros: 2 -> "2", 1.3 -> "1.3". */
+function formatRateMultiplier(rate: number): string {
+  return Number.isInteger(rate) ? String(rate) : String(Number(rate.toFixed(2)))
+}
+
 function modelInfo(provider: string, model: KiroModel): LlmModelInfo {
   return {
     provider,
     id: model.id,
-    name: model.name,
+    name: modelLabel(model),
     inputModalities: model.inputModalities,
   }
 }

@@ -374,10 +374,15 @@ describe('llm-kiro adapter stream', () => {
     const models = await inst.listModels('kiro')
     expect(warmCatalog).toHaveBeenCalledOnce()
     expect(warmCatalog).toHaveBeenCalledWith(expect.objectContaining({ region: 'no-such-region' }))
-    // Configured entries keep their positions; discovery refreshes the ids it
-    // knows and appends the models the configured list never had.
-    expect(models.map(model => model.id).slice(0, 2)).toEqual(['claude-sonnet-4-6', 'glm-5'])
+    // Discovery merges the authenticated catalog in, so the served list is the
+    // full catalog in picker order: auto first, then cheapest multiplier first.
+    expect(models[0]?.id).toBe('auto')
+    const multipliers = models
+      .map(model => model.rateMultiplier)
+      .filter((rate): rate is number => rate !== undefined)
+    expect(multipliers).toEqual([...multipliers].sort((left, right) => left - right))
     expect(models.map(model => model.id)).toContain('claude-opus-5-5')
+    expect(models.map(model => model.id)).toContain('claude-sonnet-4-6')
     expect(await inst.resolveModel('kiro', 'claude-opus-5-5')).toMatchObject({
       context: { contextWindow: 1000000 },
       defaultMaxTokens: 128000,

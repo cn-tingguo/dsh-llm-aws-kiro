@@ -22,6 +22,7 @@ import {
   KIRO_MODEL_IDS,
   mapKiroCatalogModels,
   mergeKiroModels,
+  orderKiroModels,
   resolveKiroModelId,
   servedKiroModels,
   toHarnessModelId,
@@ -193,9 +194,13 @@ describe('llm-kiro models', () => {
     const explicit: KiroModel[] = [
       { id: 'only-me', kiroModelId: 'only-me', name: 'Only Me', reasoning: false, contextWindow: 1, maxTokens: 1, inputModalities: ['text'] },
     ]
+    // An explicit list with discovery off is served exactly as authored.
     expect(servedKiroModels({ models: explicit })).toEqual(explicit)
-    expect(servedKiroModels({ models: explicit, discoverModels: true, region: 'ap-southeast-1' }))
-      .toEqual(mergeKiroModels(explicit, bootstrapKiroModels))
+    // With discovery on, the merged catalog is served in picker order.
+    const merged = servedKiroModels({ models: explicit, discoverModels: true, region: 'ap-southeast-1' })
+    expect(merged.map(model => model.id)).toEqual(
+      orderKiroModels(mergeKiroModels(explicit, bootstrapKiroModels)).map(model => model.id),
+    )
   })
 
   it('reads a shared pi-provider-kiro version-1 cache document', async () => {
@@ -239,4 +244,69 @@ describe('llm-kiro models', () => {
     expect(resolveKiroModelId('brand-new-model')).toBe('brand-new-model')
     expect(KIRO_MODEL_IDS.has('brand-new-model')).toBe(true)
   })
+
+  it('orders the picker auto first, then by credit multiplier ascending', () => {
+    const priced = (id: string, rateMultiplier?: number): KiroModel => ({
+      id,
+      kiroModelId: id,
+      name: id,
+      reasoning: true,
+      contextWindow: 200_000,
+      maxTokens: 8_192,
+      inputModalities: ['text'],
+      ...(rateMultiplier !== undefined ? { rateMultiplier } : {}),
+    })
+    const ordered = orderKiroModels([
+      priced('claude-opus-5', 2.2),
+      priced('glm-5', 0.5),
+      priced('auto', 1),
+      priced('unpriced-model'),
+      priced('qwen3-coder-next', 0.05),
+      priced('claude-sonnet-5', 1.3),
+    ])
+    // auto is pinned first; priced models ascend; the unpriced one sorts last.
+    expect(ordered.map(model => model.id)).toEqual([
+      'auto',
+      'qwen3-coder-next',
+      'glm-5',
+      'claude-sonnet-5',
+      'claude-opus-5',
+      'unpriced-model',
+    ])
+  })
+
+  it('keeps catalog order for models that tie on multiplier', () => {
+    const base = (id: string): KiroModel => ({
+      id,
+      kiroModelId: id,
+      name: id,
+      reasoning: false,
+      contextWindow: 200_000,
+      maxTokens: 8_192,
+      inputModalities: ['text'],
+      rateMultiplier: 1.3,
+    })
+    expect(orderKiroModels([base('first'), base('second'), base('third')]).map(m => m.id))
+      .toEqual(['first', 'second', 'third'])
+  })
+
+  it('applies the picker order to a merged catalog', () => {
+    const model = (id: string, rateMultiplier?: number): KiroModel => ({
+      id,
+      kiroModelId: id,
+      name: id,
+      reasoning: true,
+      contextWindow: 200_000,
+      maxTokens: 64_000,
+      inputModalities: ['text'],
+      ...(rateMultiplier !== undefined ? { rateMultiplier } : {}),
+    })
+    // mergeKiroModels is what discovery feeds the picker; order after merging.
+    const merged = mergeKiroModels(
+      [model('claude-opus-5', 2.2), model('auto', 1)],
+      [model('glm-5', 0.5), model('claude-opus-5', 2.2)],
+    )
+    expect(orderKiroModels(merged).map(entry => entry.id)).toEqual(['auto', 'glm-5', 'claude-opus-5'])
+  })
+
 })
