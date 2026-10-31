@@ -39,14 +39,14 @@ export interface EncodedKiroImage {
   data: string
 }
 
-/** Whether one message is a tool-result carrier. */
-export function isToolResultMessage(message: Message): boolean {
-  return message.role === 'user' && firstToolResultBlock(message) !== undefined
-}
-
-/** The first tool-result block of one message, when it carries one. */
-function firstToolResultBlock(message: Message): Extract<ContentBlock, { type: 'tool-result' }> | undefined {
-  return message.content.find((block): block is Extract<ContentBlock, { type: 'tool-result' }> => block.type === 'tool-result')
+/**
+ * Whether one message carries a tool result.
+ *
+ * The harness models a tool result as a first-class `role: 'tool'` message
+ * rather than a block inside a user message, so the role alone decides it.
+ */
+export function isToolResultMessage(message: SerializableMessage): boolean {
+  return message.role === 'tool'
 }
 
 /** Remove unpaired surrogates that would corrupt the wire JSON. */
@@ -67,18 +67,17 @@ function blocksText(blocks: readonly ContentBlock[]): string {
 }
 
 /** Join the text blocks of one message. */
-export function getContentText(message: Message): string {
+export function getContentText(message: SerializableMessage): string {
   return blocksText(message.content)
 }
 
 /** Extract image blocks from one message, including those nested in tool results. */
-function extractImageBlocks(message: Message): Extract<ContentBlock, { type: 'image' }>[] {
+function extractImageBlocks(message: SerializableMessage): Extract<ContentBlock, { type: 'image' }>[] {
+  // Tool results are their own messages in this message model, so no block
+  // here nests another message's content.
   const images: Array<Extract<ContentBlock, { type: 'image' }>> = []
   for (const block of message.content) {
     if (block.type === 'image') images.push(block)
-    else if (block.type === 'tool-result') {
-      for (const nested of block.content) if (nested.type === 'image') images.push(nested)
-    }
   }
   return images
 }
@@ -100,7 +99,7 @@ export function convertImagesToKiro(images: Array<{ mediaType: string; data: str
  * @throws Error when an image block has no encoded payload (the caller
  * resolved every block this conversation references).
  */
-function extractImages(message: Message, encodedImages: ReadonlyMap<string, EncodedKiroImage> | undefined): KiroImage[] {
+function extractImages(message: SerializableMessage, encodedImages: ReadonlyMap<string, EncodedKiroImage> | undefined): KiroImage[] {
   const payloads: KiroImage[] = []
   for (const block of extractImageBlocks(message)) {
     const encoded = encodedImages?.get(block.attachment.attachmentId)
@@ -131,29 +130,34 @@ export function convertToolsToKiro(tools: readonly ToolSchema[]): KiroToolSpec[]
  * @param messages - the harness conversation.
  * @returns the conversation with displaced results reordered.
  */
-export function relocateDisplacedToolResults(messages: Message[]): Message[] {
-  const out: Message[] = []
+export function relocateDisplacedToolResults(messages: SerializableMessage[]): SerializableMessage[] {
+  const out: SerializableMessage[] = []
   const pending = [...messages]
   while (pending.length > 0) {
-    const msg = pending.shift() as Message
+    const msg = pending.shift() as SerializableMessage
     out.push(msg)
     if (msg.role !== 'assistant') continue
     for (const block of msg.content) {
       if (block.type !== 'tool-call') continue
       const id = (block as ToolCallBlock).id
-      const at = pending.findIndex(candidate => firstToolResultBlock(candidate)?.toolCallId === id)
+      const at = pending.findIndex(candidate => toolResultCallId(candidate) === id)
       if (at >= 0) out.push(...pending.splice(at, 1))
     }
   }
   return out
 }
 
-/** Convert one tool-result block into the wire result, truncating its text. */
-function toKiroToolResult(block: Extract<ContentBlock, { type: 'tool-result' }>): KiroToolResult {
+/** The tool-call id one message answers, when it is a tool-result message. */
+function toolResultCallId(message: SerializableMessage): string | undefined {
+  return message.role === 'tool' ? message.toolCallId : undefined
+}
+
+/** Convert one tool-result message into the wire result, truncating its text. */
+function toKiroToolResult(message: Extract<Message, { role: 'tool' }>): KiroToolResult {
   return {
-    content: [{ text: truncate(blocksText(block.content), TOOL_RESULT_LIMIT) }],
-    status: block.isError ? 'error' : 'success',
-    toolUseId: block.toolCallId,
+    content: [{ text: truncate(blocksText(message.content), TOOL_RESULT_LIMIT) }],
+    status: message.isError === true ? 'error' : 'success',
+    toolUseId: message.toolCallId,
   }
 }
 
@@ -177,7 +181,7 @@ function parseToolArguments(block: ToolCallBlock): Record<string, unknown> {
  * @param message - the harness assistant message.
  * @returns the wire entry, or undefined when the turn carried nothing.
  */
-function toKiroAssistant(message: Message): KiroAssistantResponseMessage | undefined {
+function toKiroAssistant(message: SerializableMessage): KiroAssistantResponseMessage | undefined {
   let armContent = ''
   const armToolUses: KiroToolUse[] = []
   let armHadBlocks = false
@@ -215,7 +219,7 @@ function toKiroAssistant(message: Message): KiroAssistantResponseMessage | undef
  * the index of the first message of the current group.
  */
 export function buildHistory(
-  messages: Message[],
+  messages: SerializableMessage[],
   wireModelId: string,
   system?: string,
   encodedImages?: ReadonlyMap<string, EncodedKiroImage>,
@@ -250,8 +254,8 @@ export function buildHistory(
       let j = i
       while (j < historyMessages.length) {
         const carrier = historyMessages[j]
-        if (carrier === undefined || !isToolResultMessage(carrier)) break
-        for (const block of toolResultBlocks(carrier)) toolResults.push(toKiroToolResult(block))
+        if (carrier === undefined || carrier.role !== 'tool') break
+        toolResults.push(toKiroToolResult(carrier))
         j++
       }
       i = j - 1
@@ -298,11 +302,6 @@ export function buildHistory(
     }
   }
   return { history, systemPrepended, currentMsgStartIdx }
-}
-
-/** Tool-result blocks inside one message, flattened. */
-function toolResultBlocks(message: Message): Array<Extract<ContentBlock, { type: 'tool-result' }>> {
-  return message.content.filter((block): block is Extract<ContentBlock, { type: 'tool-result' }> => block.type === 'tool-result')
 }
 
 /** Every tool name referenced by the history's assistant entries. */
@@ -433,6 +432,17 @@ export function prepareHistory(history: KiroHistoryEntry[]): KiroHistoryEntry[] 
  * @returns the wire request body.
  * @throws Error with a context_length_exceeded message when history exceeds the budget.
  */
+/**
+ * The slice of a request message this serializer reads.
+ *
+ * `GenerateOptions.messages` is `RequestMessage`, which also admits a one-shot
+ * `RequestUserInput` that carries no durable id or source. Serialization only
+ * reads `role` and `content` (plus the tool-result fields on a `tool` role), so
+ * narrowing here keeps the rest of the module on plain message shapes without
+ * inventing identity the wire does not need.
+ */
+type SerializableMessage = Message | { readonly role: 'user'; readonly content: Message['content'] }
+
 export function serializeKiroRequest(
   options: GenerateOptions,
   wireModelId: string,
@@ -440,7 +450,7 @@ export function serializeKiroRequest(
   contextWindow: number,
   optionsImages?: ReadonlyMap<string, EncodedKiroImage>,
 ): KiroRequest {
-  const normalized = relocateDisplacedToolResults(options.messages)
+  const normalized = relocateDisplacedToolResults(options.messages as SerializableMessage[])
   const { history: rawHistory, systemPrepended, currentMsgStartIdx } = buildHistory(normalized, wireModelId, system, optionsImages)
   const history = prepareHistory(rawHistory)
   const dynamicHistoryLimit = Math.floor((contextWindow / HISTORY_LIMIT_CONTEXT_WINDOW) * HISTORY_LIMIT)
@@ -458,10 +468,10 @@ export function serializeKiroRequest(
   let currentImages: KiroImage[] | undefined
   const encodedImages = optionsImages
 
-  const collectToolResults = (messages: Message[]): void => {
+  const collectToolResults = (messages: readonly SerializableMessage[]): void => {
     for (const message of messages) {
-      if (!isToolResultMessage(message)) continue
-      for (const block of toolResultBlocks(message)) currentToolResults.push(toKiroToolResult(block))
+      if (message.role !== 'tool') continue
+      currentToolResults.push(toKiroToolResult(message))
       const images = extractImages(message, encodedImages)
       if (images.length > 0) {
         currentImages = currentImages ? [...currentImages, ...images] : images

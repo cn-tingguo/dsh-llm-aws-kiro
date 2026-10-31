@@ -189,7 +189,7 @@ describe('llm-kiro serialize', () => {
     const relocated = relocateDisplacedToolResults(displaced)
     expect(relocated.map(message => {
       if (message.role === 'assistant') return 'assistant(tools)'
-      if (message.content[0]?.type === 'tool-result') return 'result:' + message.content[0].toolCallId
+      if (message.role === 'tool') return 'result:' + message.toolCallId
       return 'user'
     })).toEqual(['assistant(tools)', 'result:A', 'user', 'assistant(tools)', 'result:B'])
   })

@@ -282,7 +282,7 @@ function discoveredFromModels(models: readonly KiroModel[]): LlmDiscoveredModel[
 }
 
 export function apply(ctx: Context, config: Config): void {
-  let current: () => Config = () => config
+  const current: () => Config = () => config
   let lastRaw: Config | undefined
   let lastGood: KiroConnectionOptions | undefined
   const options = (): KiroConnectionOptions => {
@@ -419,12 +419,8 @@ export function apply(ctx: Context, config: Config): void {
     }))
   })
 
-  ctx.inject(['settings'], scoped => {
-    scoped.settings.installSection(scoped, NS, Config, config, {
-      setSource: (source) => {
-        current = source
-      },
-      onChange: ensureRegistrationFacts,
-    })
-  })
+  // Package settings are read through the profile entry config. The 0.2.x
+  // SettingsForms service projects Config schemas itself; there is no
+  // per-plugin section installer to call.
+  void ensureRegistrationFacts
 }

@@ -144,14 +144,9 @@ export interface KiroAdapterOptions {
 /** The Kiro provider route name. */
 export const PROVIDER = 'kiro'
 
-/** Every image block in one block list, including tool-result nesting. */
+/** Every image block in one block list. */
 function imageBlocks(blocks: readonly ContentBlock[]): ImageBlock[] {
-  const images: ImageBlock[] = []
-  for (const block of blocks) {
-    if (block.type === 'image') images.push(block)
-    else if (block.type === 'tool-result') images.push(...imageBlocks(block.content))
-  }
-  return images
+  return blocks.filter((block): block is ImageBlock => block.type === 'image')
 }
 
 function modelInfo(provider: string, model: KiroModel): LlmModelInfo {

@@ -1,5 +1,5 @@
 /**
- * Real-composition guard: LlmRuntime, settings-file, credentials-local, and
+ * Real-composition guard: LlmRuntime, settings, credentials-local, and
  * llm-kiro boot from a test-only cordis.yml through the actual Loader +
  * Include path. Credentials come from the ambient store (a fixture kiro-cli
  * database), and the runtime request lands on the scripted mock server.
@@ -13,7 +13,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
-import FileSettingsProvider from '@deepseek-ai/dsh-settings-file'
+import SettingsForms from '@deepseek-ai/dsh-settings'
 import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
 import * as LlmKiro from '../src/index.ts'
 import { DatabaseSync } from 'node:sqlite'
@@ -47,10 +47,7 @@ async function loadComposition(options: { dbPath: string; ssoCacheDir: string; r
     '- id: llm',
     "  name: 'test-llm-service'",
     '- id: settings',
-    "  name: '@deepseek-ai/dsh-settings-file'",
-    '  config:',
-    '    path: ' + JSON.stringify(settingsPath),
-    '    debounceMs: 10',
+    "  name: '@deepseek-ai/dsh-settings'",
     '- id: credentials',
     "  name: '@deepseek-ai/dsh-credentials-local'",
     '  config:',
@@ -72,7 +69,7 @@ async function loadComposition(options: { dbPath: string; ssoCacheDir: string; r
   ctx.loader.builtins.include = Include
   const modules = new Map<string, unknown>([
     ['test-llm-service', LlmRuntime],
-    ['@deepseek-ai/dsh-settings-file', FileSettingsProvider],
+    ['@deepseek-ai/dsh-settings', SettingsForms],
     ['@deepseek-ai/dsh-credentials-local', LocalCredentialProvider],
     ['llm-kiro', LlmKiro],
   ])
@@ -116,9 +113,12 @@ describe('llm-kiro real dynamic composition', () => {
     const server = await mockServer([{ kind: 'eventstream', events: textEvents }])
     const { ctx } = await loadComposition({ dbPath, ssoCacheDir, runtimeURL: server.url })
 
-    expect(ctx.get('settings')!.describe().map(entry => entry.ns)).toContain(NS)
+    // 0.2.x projects Config schemas through SettingsForms itself; the plugin
+    // registers its configurable route on the LLM service instead of pushing a
+    // settings section, so that registration is what this composition proves.
+    const configurable = ctx.llm.listConfigurableProviders().find(provider => provider.provider === 'kiro')
+    expect(configurable?.settingsNs).toBe(NS)
     expect(ctx.llm.listProviders().map(provider => provider.id)).toContain('kiro')
-    expect(ctx.llm.listConfigurableProviders().map(provider => provider.provider)).toContain('kiro')
     await assemble(ctx, { model: 'claude-sonnet-4-6', messages: [] })
     expect(server.headers[0]?.authorization).toBe('Bearer boot-token')
   })

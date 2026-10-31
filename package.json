@@ -11,10 +11,6 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./invariant": {
-      "types": "./lib/invariant.d.ts",
-      "default": "./lib/invariant.js"
-    },
     "./src/*": "./src/*",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
@@ -36,15 +32,14 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": ">=3.0.0",
-    "@deepseek-ai/dsh-attachment": ">=0.0.1-rc.1",
-    "@deepseek-ai/dsh-credentials": ">=0.0.1-rc.1",
-    "@deepseek-ai/dsh-invariants": ">=0.0.1-rc.1",
-    "@deepseek-ai/dsh-launch-environment": ">=0.0.1-rc.1",
-    "@deepseek-ai/dsh-llm": ">=0.0.1-rc.1",
-    "@deepseek-ai/dsh-settings": ">=0.0.1-rc.1",
-    "@deepseek-ai/dsh-timeout": ">=0.0.1-rc.1",
-    "@deepseek-ai/schemastery": ">=3.0.0"
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/dsh-attachment": ">=0.2.1-rc.5",
+    "@deepseek-ai/dsh-credentials": ">=0.2.1-rc.5",
+    "@deepseek-ai/dsh-launch-environment": ">=0.2.1-rc.5",
+    "@deepseek-ai/dsh-llm": ">=0.2.1-rc.5",
+    "@deepseek-ai/dsh-settings": ">=0.2.1-rc.5",
+    "@deepseek-ai/dsh-timeout": ">=0.2.1-rc.5",
+    "@deepseek-ai/schemastery": "~3.18.5"
   },
   "dependencies": {
     "@smithy/core": "^3.24.0",
@@ -53,18 +48,17 @@
   "devDependencies": {
     "@deepseek-ai/cordis-plugin-include": "^1.0.6",
     "@deepseek-ai/cordis-plugin-loader": "^1.0.2",
-    "@deepseek-ai/dsh-attachment": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-credentials": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-credentials-local": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-invariants": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-launch-environment": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-llm": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-settings": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-settings-file": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-timeout": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-util-values": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-attachment": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-credentials": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-credentials-local": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-launch-environment": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-settings": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-timeout": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-util-values": "0.2.1-rc.5",
     "@types/node": "^22.20.0",
     "typescript": "^6.0.0",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.8",
+    "@deepseek-ai/schemastery": "3.18.5"
   }
 }
