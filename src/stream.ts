@@ -22,10 +22,42 @@ const CAPACITY_MAX_DELAY_MS = 30_000
 
 /** The body marker for a transient model-capacity rejection. */
 const CAPACITY_PATTERN = 'INSUFFICIENT_MODEL_CAPACITY'
-/** Body markers for terminal monthly quota exhaustion. */
-const NON_RETRYABLE_BODY_PATTERNS = ['MONTHLY_REQUEST_COUNT']
-/** Body markers for requests exceeding the context window. */
-const TOO_BIG_PATTERNS = ['CONTENT_LENGTH_EXCEEDS_THRESHOLD', 'Input is too long']
+/**
+ * Body markers for terminal quota exhaustion.
+ *
+ * Reverse-engineering kiro-cli 2.36 surfaced the monthly, daily, and credit
+ * limit codes; all three are terminal for one request and map to QUOTA.
+ */
+const NON_RETRYABLE_BODY_PATTERNS = [
+  'MONTHLY_REQUEST_COUNT',
+  'DAILY_REQUEST_COUNT',
+  'CREDIT_CONSUMPTION_LIMIT',
+]
+/**
+ * Body markers for requests exceeding the context window. The runtime uses two
+ * spellings: the request-validation `CONTENT_LENGTH_EXCEEDS_THRESHOLD` and the
+ * stop-reason `MODEL_CONTEXT_WINDOW_EXCEEDED`.
+ */
+const TOO_BIG_PATTERNS = [
+  'CONTENT_LENGTH_EXCEEDS_THRESHOLD',
+  'MODEL_CONTEXT_WINDOW_EXCEEDED',
+  'Input is too long',
+]
+/**
+ * Body markers for a request the backend rejects as malformed rather than
+ * transient. These stay INVALID_REQUEST but are named so a reader can see what
+ * the 400 family covers: an unknown model, a stale thinking signature, a bad
+ * tool schema, or an unsupported attachment.
+ */
+const INVALID_REQUEST_PATTERNS = [
+  'INVALID_MODEL_ID',
+  'THINKING_SIGNATURE_INVALID',
+  'TOOL_SCHEMA_INVALID',
+  'REQUEST_BODY_INVALID',
+  'IMAGE_FORMAT_UNSUPPORTED',
+  'IMAGE_DIMENSION_EXCEEDED',
+  'DOCUMENT_MODEL_NOT_SUPPORTED',
+]
 
 /** One runtime request's transport facts. */
 export interface KiroTransportOptions {
@@ -55,9 +87,38 @@ export function isNonRetryableBodyError(errorText: string): boolean {
   return NON_RETRYABLE_BODY_PATTERNS.some(pattern => errorText.includes(pattern))
 }
 
-/** Whether an HTTP failure is a request-too-large rejection. */
+/**
+ * Whether an HTTP failure is a request-too-large rejection. A 413 is always
+ * too-large; otherwise any of the context-window body markers identifies it,
+ * at whatever status the runtime attaches them to.
+ */
 export function isTooBigError(status: number, errorText: string): boolean {
-  return status === 413 || (status === 400 && TOO_BIG_PATTERNS.some(pattern => errorText.includes(pattern)))
+  return status === 413 || TOO_BIG_PATTERNS.some(pattern => errorText.includes(pattern))
+}
+
+/** Whether an error body names a malformed-request condition. */
+export function isInvalidRequestError(errorText: string): boolean {
+  return INVALID_REQUEST_PATTERNS.some(pattern => errorText.includes(pattern))
+}
+
+/**
+ * Read the server's requested retry delay from the response, in milliseconds.
+ *
+ * The runtime answers a retryable rejection with `x-amz-retry-after`, an
+ * integer millisecond count (the AWS SDK convention kiro-cli honors as
+ * "explicit request from server to delay before retrying"). Honoring it is
+ * friendlier than a fixed exponential guess, but the value is clamped to a
+ * ceiling so a hostile or mistaken header cannot stall the turn.
+ * @param response - the failed HTTP response.
+ * @param maxMs - the largest delay to honor.
+ * @returns the clamped delay, or undefined when no usable header is present.
+ */
+export function retryAfterMs(response: Response, maxMs: number): number | undefined {
+  const raw = response.headers.get('x-amz-retry-after') ?? response.headers.get('retry-after')
+  if (raw === null) return undefined
+  const parsed = Number(raw.trim())
+  if (!Number.isFinite(parsed) || parsed < 0) return undefined
+  return Math.min(parsed, maxMs)
 }
 
 /** A delay that rejects early when the abort signal fires. */
@@ -110,6 +171,7 @@ function httpErrorCode(status: number, errorText: string): string {
   if (status === 401 || status === 403) return 'AUTH'
   if (isNonRetryableBodyError(errorText)) return 'QUOTA'
   if (isTooBigError(status, errorText)) return 'CONTEXT_WINDOW_EXCEEDED'
+  if (isInvalidRequestError(errorText)) return 'INVALID_REQUEST'
   if (status === 429) return 'RATE_LIMIT'
   if (status === 400) return 'INVALID_REQUEST'
   if (status >= 500) return 'SERVER'
@@ -160,12 +222,15 @@ export async function* streamKiroEvents(options: KiroTransportOptions): AsyncGen
     }
     if (isCapacityError(errorText) && capacityRetryCount < CAPACITY_MAX_RETRIES) {
       capacityRetryCount++
-      const delayMs = options.capacityDelayMs !== undefined
+      // Prefer the server's own x-amz-retry-after over a blind exponential
+      // guess; fall back to the local schedule when it names none.
+      const serverDelay = retryAfterMs(response, CAPACITY_MAX_DELAY_MS)
+      const delayMs = serverDelay ?? (options.capacityDelayMs !== undefined
         ? options.capacityDelayMs(capacityRetryCount - 1)
         : Math.min(
             CAPACITY_BASE_DELAY_MS * 2 ** (capacityRetryCount - 1),
             CAPACITY_MAX_DELAY_MS,
-          )
+          ))
       await abortableDelay(delayMs, options.signal)
       continue
     }

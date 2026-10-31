@@ -221,6 +221,21 @@ describe('llm-kiro adapter stream', () => {
     await expect(collect(adapter().stream(request()))).rejects.toMatchObject({ code: 'SERVER' })
   })
 
+  it('classifies the reverse-engineered error codes', async () => {
+    // Daily and credit limits join the monthly one as QUOTA.
+    await closeMockServers()
+    await serverWith([{ kind: 'http-error', status: 429, body: 'DAILY_REQUEST_COUNT_LIMIT_EXCEEDED' }])
+    await expect(collect(adapter().stream(request()))).rejects.toMatchObject({ code: 'QUOTA' })
+    // The stop-reason spelling of context overflow is recognized too.
+    await closeMockServers()
+    await serverWith([{ kind: 'http-error', status: 400, body: 'MODEL_CONTEXT_WINDOW_EXCEEDED' }])
+    await expect(collect(adapter().stream(request()))).rejects.toMatchObject({ code: 'CONTEXT_WINDOW_EXCEEDED' })
+    // A malformed-request code maps to INVALID_REQUEST even off the 400 path.
+    await closeMockServers()
+    await serverWith([{ kind: 'http-error', status: 422, body: 'THINKING_SIGNATURE_INVALID' }])
+    await expect(collect(adapter().stream(request()))).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+  })
+
   it('maps caller abort to ABORTED', async () => {
     const controller = new AbortController()
     const server = await serverWith([{ kind: 'eventstream', events: [{ eventType: 'conversation', payload: { content: 'x' } }], stallAfterMs: 60_000 }])
