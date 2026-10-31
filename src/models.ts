@@ -100,12 +100,13 @@ export const bootstrapKiroModels: readonly KiroModel[] = BOOTSTRAP.map(model => 
 export const KIRO_MODEL_IDS = new Set(bootstrapKiroModels.map(model => model.kiroModelId))
 
 /**
- * Order the picker: `auto` first, then cheapest first by credit multiplier.
+ * Order the picker: `auto` first, then highest credit multiplier first.
  *
  * The catalog reports a relative credit cost per model but no rank, so this is
- * the only ordering signal that reflects what a choice actually costs. A model
- * whose entry the catalog did not price sorts after every priced one; models
- * that tie keep the catalog order.
+ * the only ordering signal that reflects what a choice actually costs. The
+ * most expensive models lead, which keeps the strongest models reachable
+ * without scrolling; a model whose entry the catalog did not price sorts after
+ * every priced one, and models that tie keep the catalog order.
  *
  * @param models - the served catalog in catalog order.
  * @returns a new array in picker order.
@@ -121,8 +122,15 @@ export function orderKiroModels(models: readonly KiroModel[]): KiroModel[] {
       const leftAuto = left.model.id === AUTO_MODEL_ID ? 0 : 1
       const rightAuto = right.model.id === AUTO_MODEL_ID ? 0 : 1
       if (leftAuto !== rightAuto) return leftAuto - rightAuto
-      const byPrice = priced(left.model) - priced(right.model)
-      if (byPrice !== 0) return byPrice
+      // Descending: highest multiplier first. An unpriced model ranks below
+      // every priced one regardless of direction, so it is excluded from the
+      // numeric comparison rather than pushed to one end by Infinity.
+      const leftPrice = priced(left.model)
+      const rightPrice = priced(right.model)
+      const leftPriced = Number.isFinite(leftPrice)
+      const rightPriced = Number.isFinite(rightPrice)
+      if (leftPriced !== rightPriced) return leftPriced ? -1 : 1
+      if (leftPriced && rightPriced && leftPrice !== rightPrice) return rightPrice - leftPrice
       return left.index - right.index
     })
     .map(entry => entry.model)

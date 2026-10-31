@@ -245,7 +245,7 @@ describe('llm-kiro models', () => {
     expect(KIRO_MODEL_IDS.has('brand-new-model')).toBe(true)
   })
 
-  it('orders the picker auto first, then by credit multiplier ascending', () => {
+  it('orders the picker auto first, then by credit multiplier descending', () => {
     const priced = (id: string, rateMultiplier?: number): KiroModel => ({
       id,
       kiroModelId: id,
@@ -264,13 +264,13 @@ describe('llm-kiro models', () => {
       priced('qwen3-coder-next', 0.05),
       priced('claude-sonnet-5', 1.3),
     ])
-    // auto is pinned first; priced models ascend; the unpriced one sorts last.
+    // auto is pinned first; priced models descend; the unpriced one sorts last.
     expect(ordered.map(model => model.id)).toEqual([
       'auto',
-      'qwen3-coder-next',
-      'glm-5',
-      'claude-sonnet-5',
       'claude-opus-5',
+      'claude-sonnet-5',
+      'glm-5',
+      'qwen3-coder-next',
       'unpriced-model',
     ])
   })
@@ -306,7 +306,7 @@ describe('llm-kiro models', () => {
       [model('claude-opus-5', 2.2), model('auto', 1)],
       [model('glm-5', 0.5), model('claude-opus-5', 2.2)],
     )
-    expect(orderKiroModels(merged).map(entry => entry.id)).toEqual(['auto', 'glm-5', 'claude-opus-5'])
+    expect(orderKiroModels(merged).map(entry => entry.id)).toEqual(['auto', 'claude-opus-5', 'glm-5'])
   })
 
 })
