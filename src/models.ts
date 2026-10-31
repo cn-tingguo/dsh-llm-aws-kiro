@@ -90,10 +90,44 @@ const BOOTSTRAP: Array<Omit<KiroModel, 'kiroModelId' | 'inputModalities'> & { in
   { id: 'auto', kiroModelId: 'auto', name: 'Auto', reasoning: true, contextWindow: ZERO_CONTEXT_WINDOW, maxTokens: 64000 },
 ]
 
+/**
+ * Modalities inferred from a model id, used only before the authenticated
+ * catalog is available.
+ *
+ * This is a guess, and it is wrong for models the Claude naming convention
+ * does not cover: the catalog reports `auto` and the GPT 5.6 family as
+ * image-capable, while the prefix test calls them text-only. Discovery
+ * overrides it with {@link catalogModalities}.
+ * @param id - the harness model id.
+ * @returns the guessed modalities.
+ */
+function guessedModalities(id: string): readonly ModelModality[] {
+  return id.startsWith('claude-') ? ['text', 'image'] : ['text']
+}
+
+/**
+ * Read the modalities the authenticated catalog declares for one model.
+ * @param supportedInputTypes - the catalog's `supportedInputTypes` value.
+ * @returns the declared modalities, or undefined when the catalog names none.
+ */
+function catalogModalities(supportedInputTypes: unknown): readonly ModelModality[] | undefined {
+  if (!Array.isArray(supportedInputTypes)) return undefined
+  const declared = new Set(
+    supportedInputTypes.filter((entry): entry is string => typeof entry === 'string').map(entry => entry.toUpperCase()),
+  )
+  if (declared.size === 0) return undefined
+  const modalities: ModelModality[] = []
+  // Text is implied: every chat model accepts it, and a catalog entry that
+  // lists only IMAGE would still be driven by a text prompt.
+  if (declared.has('TEXT') || declared.size > 0) modalities.push('text')
+  if (declared.has('IMAGE')) modalities.push('image')
+  return modalities
+}
+
 /** The shipped bootstrap catalog, with modalities filled in. */
 export const bootstrapKiroModels: readonly KiroModel[] = BOOTSTRAP.map(model => ({
   ...model,
-  inputModalities: model.inputModalities ?? (model.id.startsWith('claude-') ? ['text', 'image'] as const : ['text'] as const),
+  inputModalities: model.inputModalities ?? guessedModalities(model.id),
 }))
 
 /** Known wire model ids: the bootstrap set, extended by discovery. */
@@ -208,8 +242,11 @@ export function mapKiroCatalogModels(catalogModels: KiroCatalogModel[], region: 
       typeof catalogModel.displayName === 'string' && catalogModel.displayName.length > 0
         ? catalogModel.displayName
         : undefined
-    const isClaude = id.startsWith('claude-')
     const effortConfig = getKiroEffortConfig(schema, kiroModelId)
+    // The catalog's own declaration wins over both the bootstrap entry and the
+    // id-prefix guess: it is the only authenticated answer, and it is what
+    // makes `auto` and the GPT 5.6 family usable with images.
+    const declaredModalities = catalogModalities(catalogModel.supportedInputTypes)
 
     return {
       id,
@@ -217,7 +254,8 @@ export function mapKiroCatalogModels(catalogModels: KiroCatalogModel[], region: 
       name: catalogName ?? existing?.name ?? humanizeModelId(id),
       reasoning:
         (schema !== undefined && effortConfig !== undefined) || (schema === undefined && hasReasoningFamilyFallback(id)),
-      inputModalities: existing ? [...existing.inputModalities] : isClaude ? ['text', 'image'] as const : ['text'] as const,
+      inputModalities:
+        declaredModalities ?? (existing ? [...existing.inputModalities] : guessedModalities(id)),
       contextWindow: maxInputTokens ?? DEFAULT_CONTEXT_WINDOW,
       maxTokens: maxOutputTokens ?? DEFAULT_MAX_TOKENS,
       ...(existing?.firstTokenTimeoutMs ? { firstTokenTimeoutMs: existing.firstTokenTimeoutMs } : {}),

@@ -82,6 +82,33 @@ describe('llm-kiro models', () => {
     expect(() => resolveKiroModelId('nope-model')).toThrow('unknown Kiro model id')
   })
 
+  it('takes image support from the catalog, not from the model id', () => {
+    // `auto` and the GPT family are image-capable but do not match the Claude
+    // prefix the pre-discovery guess relies on; only the catalog knows.
+    const mapped = mapKiroCatalogModels([
+      catalogModel('auto', { supportedInputTypes: ['TEXT', 'IMAGE'] }),
+      catalogModel('gpt-5.6-luna', { supportedInputTypes: ['TEXT', 'IMAGE'] }),
+      catalogModel('text-only-model', { supportedInputTypes: ['TEXT'] }),
+      // A Claude entry the catalog reports as text-only loses the guess too.
+      catalogModel('claude-sonnet-4.6', { supportedInputTypes: ['TEXT'] }),
+    ], 'us-east-1')
+    const modalities = (id: string): readonly string[] | undefined =>
+      mapped.find(model => model.id === id)?.inputModalities
+    expect(modalities('auto')).toEqual(['text', 'image'])
+    expect(modalities('gpt-5-6-luna')).toEqual(['text', 'image'])
+    expect(modalities('text-only-model')).toEqual(['text'])
+    expect(modalities('claude-sonnet-4-6')).toEqual(['text'])
+  })
+
+  it('falls back to the id guess when the catalog declares no input types', () => {
+    const mapped = mapKiroCatalogModels([
+      catalogModel('claude-opus-5'),
+      catalogModel('brand-new-model'),
+    ], 'us-east-1')
+    expect(mapped.find(model => model.id === 'claude-opus-5')?.inputModalities).toEqual(['text', 'image'])
+    expect(mapped.find(model => model.id === 'brand-new-model')?.inputModalities).toEqual(['text'])
+  })
+
   it('maps an authenticated catalog, merging bootstrap metadata', () => {
     const mapped = mapKiroCatalogModels([
       catalogModel('claude-sonnet-4.6', { additionalModelRequestFieldsSchema: null }),

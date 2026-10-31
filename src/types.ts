@@ -138,6 +138,12 @@ export interface KiroCatalogModel {
   additionalModelRequestFieldsSchema?: Record<string, unknown> | null
   /** Relative credit cost of this model; the catalog's ordering signal. */
   rateMultiplier?: number | null
+  /**
+   * Input kinds the model accepts, as the catalog spells them: `TEXT`,
+   * `IMAGE`. This is the authenticated answer to "can it read an image",
+   * which no naming convention can be trusted to predict.
+   */
+  supportedInputTypes?: readonly string[] | null
   [key: string]: unknown
 }
 
