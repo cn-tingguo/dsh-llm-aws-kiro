@@ -365,6 +365,27 @@ describe('llm-kiro adapter stream', () => {
     expect(body.additionalModelRequestFields).toMatchObject({ output_config: { effort: 'medium' } })
   })
 
+  it('shows the credit multiplier beside the model name, not inside it', async () => {
+    const models = await adapter({
+      options: () => connection({
+        region: 'us-east-1',
+        discoverModels: true,
+        models: [
+          { id: 'auto', kiroModelId: 'auto', name: 'Auto', reasoning: true, contextWindow: 200_000, maxTokens: 64_000, inputModalities: ['text'], rateMultiplier: 1 },
+          { id: 'glm-5', kiroModelId: 'glm-5', name: 'GLM 5', reasoning: true, contextWindow: 200_000, maxTokens: 8_192, inputModalities: ['text'], rateMultiplier: 0.5 },
+          { id: 'claude-sonnet-4', kiroModelId: 'claude-sonnet-4', name: 'Claude Sonnet 4', reasoning: true, contextWindow: 200_000, maxTokens: 8_192, inputModalities: ['text'] },
+        ],
+      }),
+    }).listModels('kiro')
+    const byId = new Map(models.map(model => [model.id, model]))
+    // The name stays the catalog's own label; the cost rides in description.
+    expect(byId.get('glm-5')?.name).toBe('GLM 5')
+    expect(byId.get('glm-5')?.description).toBe('0.5x credit')
+    expect(byId.get('auto')?.description).toBe('1x credit')
+    // An unpriced model gets no fabricated multiplier.
+    expect(byId.get('claude-sonnet-4')?.description).toBeUndefined()
+  })
+
   it('refreshes the served catalog from discovery and warms it when the list is read', async () => {
     const warmCatalog = vi.fn()
     const inst = adapter({
