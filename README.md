@@ -18,12 +18,16 @@ harness itself.
 | Concern | Implementation |
 |---|---|
 | **Existing credentials** | Picks up an existing kiro-cli login (the `auth_kv` table of kiro-cli's SQLite store, IDC and social tokens) and the Kiro IDE token (`~/.aws/sso/cache/kiro-auth-token.json` with its OIDC client registration) — no second sign-in. An optional `bearerTokenEnv` reference bypasses ambient discovery for CI/bots. |
-| **Token refresh** | Silent refresh of expired tokens through the AWS SSO OIDC `/token` endpoint (Builder ID / IAM Identity Center) or the Kiro desktop auth service (Google/GitHub social), write-back into the kiro-cli store so both consumers stay in sync; a 403 mid-stream re-reads the shared store and falls back to `kiro-cli debug refresh-auth-token`; last-resort failure surfaces as `MISSING_CREDENTIAL`/AUTH with guidance. |
+| **Token refresh** | Silent refresh of expired tokens through the AWS SSO OIDC `/token` endpoint (Builder ID / IAM Identity Center) or the Kiro desktop auth service (Google/GitHub social), write-back into the kiro-cli store so both consumers stay in sync. A 403 mid-stream re-reads the shared store, then refreshes directly, then falls back to `kiro-cli whoami --format json`, which authenticates the live session and rotates an expired token. Every refresh transport is bounded by a timeout. Last-resort failure surfaces as `MISSING_CREDENTIAL`/AUTH with guidance. |
 | **The backend** | Region/endpoint resolution (SSO region → Kiro API region), the management control plane (`List-Available-Profiles`, `List-Available-Models`, shared `~/.kiro-management-models-cache.json` catalog cache), and the runtime `generateAssistantResponse` call over the AWS event-stream protocol (Smithy framing via `@smithy/core`), with capacity backoff, first-token timeout, and the harness idle watchdog. |
-| **Models** | A bootstrap catalog mirroring the kiro-cli-verified menu (21 models with context windows, output caps, reasoning capability, image modality), exact wire-id resolution (dashed harness ids ⇄ dotted wire ids), and the authenticated management catalog, which refreshes the served metadata and appends models that shipped after the bootstrap list — reaching the model picker, not just the Models page. The reasoning-effort picker offers `off` plus each model's own Kiro effort rungs from its authenticated effort schema (e.g. `low`/`medium`/`high`/`xhigh`/`max`), with the Kiro thinking markers on the system prompt. |
+| **Models** | A bootstrap catalog mirroring the kiro-cli-verified menu (21 models with context windows, output caps, reasoning capability, image modality), exact wire-id resolution (dashed harness ids ⇄ dotted wire ids), and the authenticated management catalog, which refreshes the served metadata and appends models that shipped after the bootstrap list — reaching the model picker, not just the Models page. The picker lists `auto` first, then the rest by descending credit multiplier with the cost shown in the label; a model the authenticated catalog no longer lists is dropped instead of offered. The reasoning-effort picker offers `off` plus each model's own Kiro effort rungs from its authenticated effort schema (e.g. `low`/`medium`/`high`/`xhigh`/`max`), with the Kiro thinking markers on the system prompt. |
 
 Every runtime request carries the harness attribution `User-Agent` (from `@deepseek-ai/dsh-llm`
 `attributionHeaders()`) plus the AWS SDK-shaped `x-amz-user-agent` telemetry header the backend expects.
+
+Settings section removed: harness 0.2.x projects a plugin's `Config` schema through `SettingsForms`
+itself, so the provider registers a configurable route on `ctx.llm` instead of installing its own
+settings section. The plugin's config still comes from its `cordis.patch.yml` entry.
 
 ## Icon and attribution
 
@@ -86,6 +90,19 @@ edited at runtime — a change reaches the next request without a restart.
 | `ssoCacheDir` | `~/.aws/sso/cache` | Kiro IDE token directory override. |
 | `allowKiroCliRefresh` | `true` | Whether 403 recovery may shell out to `kiro-cli`. |
 
+Each entry of `models` accepts:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `id` | required | Harness model id shown in the picker (dashed form, e.g. `claude-sonnet-4-6`). |
+| `kiroModelId` | derived from `id` | Exact wire id the runtime accepts (dotted form, e.g. `claude-sonnet-4.6`). |
+| `name` | `id` | Picker label. |
+| `reasoning` | `false` | Whether the model exposes reasoning content. |
+| `contextWindow` | `200000` | Combined request/response capacity. |
+| `maxTokens` | `8192` | Per-request output cap. |
+| `inputModalities` | `['text']` | Accepted modalities; `image` enables image input. |
+| `firstTokenTimeoutMs` | global default | Longer first-event budget for a slow model. |
+
 ## Models
 
 Bootstrap catalog (harness id → wire id):
@@ -107,25 +124,41 @@ Bootstrap catalog (harness id → wire id):
 | `auto` | `auto` | 1M | ✓ | ✓ |
 
 Both dashed and dotted spellings resolve to the wire id. The bootstrap list is the pre-discovery
-fallback and the curated menu order; the authenticated management catalog
+fallback and the pre-discovery menu; the authenticated management catalog
 (`List-Available-Models`, per credential, per region) refreshes matched entries' capacities,
-effort schemas, and reasoning metadata and appends models the bootstrap list has not learned yet.
-Discovery reaches the harness model picker: reading the model list serves the cache immediately
-and refreshes it in the background for the next read, so a slow or unreachable management endpoint
-never delays a picker or a request. An explicit non-empty `models` list replaces discovery
-entirely and is served verbatim.
+effort schemas, reasoning metadata and credit multiplier, and appends models the bootstrap list has
+not learned yet. An explicit non-empty `models` list replaces discovery entirely and is served
+verbatim, keeping the order its author wrote.
+
+Discovery reaches the harness model picker: reading the model list serves the cache immediately and
+refreshes it in the background for the next read, so a slow or unreachable management endpoint never
+delays a picker or a request.
+
+Once an authenticated catalog is present, it is authoritative in two ways:
+
+- **Retired models drop out.** An entry the catalog no longer lists is removed rather than offered
+  without a price, because selecting it would fail at request time. With no catalog fetched yet,
+  nothing is treated as retired.
+- **The picker orders by cost.** `auto` comes first, the rest follow in descending credit
+  multiplier, and the multiplier appears in the label (`Claude Sonnet 5 · 1.3x`). A model the
+  catalog did not price keeps its bare name and sorts last.
 
 The catalog cache at `~/.kiro-management-models-cache.json` is shared with pi-provider-kiro:
-that tool writes format version 1, this provider reads that layout and writes version 2.
+that tool writes format version 1, this provider reads that layout and writes version 2. Entries are
+held for eight hours before a refetch; delete the file to force one immediately.
 
 ## Development
 
 ```bash
 pnpm install
-pnpm run build       # tsc -b: compiles this package; deps resolve from the published @deepseek-ai packages
-pnpm test            # vitest suite (105 tests): endpoints, store, refresh, models, effort, serialize,
+pnpm run build       # tsc -b: compiles this package; deps resolve from the pinned @deepseek-ai packages
+pnpm test            # vitest suite (121 tests): endpoints, store, refresh, models, effort, serialize,
                      # translate, adapter transport, real Loader composition
 ```
+
+The suite pins behaviour that is easy to regress silently: the picker order, the eight-hour cache
+boundary, the retirement rule for models the catalog dropped, and the request body each transport
+sends.
 
 Tests resolve the harness packages from the published `@deepseek-ai/*` packages in `node_modules`
 (peer dependencies plus the dev-dependency set at the versions the code is developed against), so
@@ -137,12 +170,21 @@ machine's real kiro-cli / Kiro IDE stores.
 - **Interactive login** is not bundled: with no ambient credentials the provider fails with
   `MISSING_CREDENTIAL` and points at `kiro-cli login` or the Kiro IDE. A device-code flow can be
   added later on the management seam.
+- **A cost badge beside the model name is not implemented.** The composer renders
+  `conversation.input.model.label`, and a Client half was written for it following the shape of the
+  official model-label plugin, but its registration never took effect on a link-installed package:
+  the entry imported without failing boot and the slot kept only its built-in occupant. The cost
+  therefore rides in the model name. Diagnosing it needs the browser console, which is not available
+  from the Host.
 - **Legacy inline thinking dialect**: reasoning arrives through the native `thinkingText` events;
   models that emit `<thinking>` tags inside content keep them in the visible text block.
 - **Replay state** is not emitted; history is resent as provider-neutral content on follow-ups.
-- The management catalog refresh is pull-based, not scheduled: reading the model list serves the
-  cached or bootstrap catalog and refreshes the cache for the next read, so the first read after the
-  TTL can lag one launch behind the authenticated catalog.
+- **The catalog refresh is pull-based, not scheduled.** Reading the model list serves the cached or
+  bootstrap catalog and refreshes the cache for the next read, so a newly enabled model appears only
+  after the next refresh — at most eight hours after the catalog changes.
+- **A model is only as fresh as the last successful refresh.** Because the bootstrap list no longer
+  carries the newest entries (a deliberate choice, so the catalog stays authoritative), a cache that
+  is missing or stale hides those models until a refresh succeeds.
 
 ## License
 
