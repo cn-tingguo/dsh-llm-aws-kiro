@@ -25,6 +25,13 @@ harness itself.
 Every runtime request carries the harness attribution `User-Agent` (from `@deepseek-ai/dsh-llm`
 `attributionHeaders()`) plus the AWS SDK-shaped `x-amz-user-agent` telemetry header the backend expects.
 
+## Icon and attribution
+
+`icon.svg` is the official Kiro mark, downloaded from https://kiro.dev/icon.svg.
+"Kiro" and its mark are trademarks of Amazon Web Services; the icon is used here
+only to identify the product this plugin connects to. Replace it if you
+redistribute the plugin under different branding.
+
 ## Install
 
 The package is ESM and declares the harness packages it talks to as peer dependencies — the host
