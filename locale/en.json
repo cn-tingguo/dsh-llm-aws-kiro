@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Kiro Provider",
+    "description": "Adds Kiro models to the model picker, reusing an existing kiro-cli or Kiro IDE sign-in."
+  }
+}

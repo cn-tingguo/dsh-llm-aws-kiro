@@ -1,8 +1,13 @@
 English | [中文](README.zh.md)
 
-# dsh-llm-kiro
+# dsh-llm-kiro-local
 
 A Kiro provider for the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) LLM seam.
+
+This is a local fork of [joshryandavis/dsh-llm-aws-kiro](https://github.com/joshryandavis/dsh-llm-aws-kiro),
+retargeted at the harness 0.2.x message model and package line. Fork-specific changes are
+committed on top of the upstream history, so `git fetch upstream && git merge upstream/main`
+keeps working.
 
 The package is a standalone Cordis plugin: it mounts in any harness composition through
 `cordis.yml`, registers the `kiro` provider route on `ctx.llm`, and needs no changes to the
@@ -28,14 +33,14 @@ DSH installation provides them. It also declares the `dsh` bundle manifest
 plain plugin dependency.
 
 ```bash
-dsh plugin --profile <profile> add @joshryandavis/dsh-llm-kiro
+dsh plugin --profile <profile> add dsh-llm-kiro-local
 ```
 
 Mount it in `cordis.yml`:
 
 ```yaml
 - id: llm-kiro
-  name: '@joshryandavis/dsh-llm-kiro'
+  name: 'dsh-llm-kiro-local'
   config:
     region: us-east-1        # optional; the credential's region wins when omitted
     reasoningEffort: high    # optional; off | low | medium | high | xhigh | max (default high)
@@ -46,7 +51,7 @@ up ambiently, refreshed silently, and written back. A static bearer token works 
 
 ```yaml
 - id: llm-kiro
-  name: '@joshryandavis/dsh-llm-kiro'
+  name: 'dsh-llm-kiro-local'
   config:
     bearerTokenEnv: KIRO_BEARER_TOKEN   # stored via the harness credentials service
 ```

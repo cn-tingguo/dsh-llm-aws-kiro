@@ -1,6 +1,6 @@
 {
   "name": "dsh-llm-kiro-local",
-  "version": "0.1.3",
+  "version": "0.2.1-local.1",
   "description": "Kiro (AWS CodeWhisperer/Q successor) provider for the DeepSeek Harness: ambient credential pickup, OAuth token refresh, and the Kiro runtime/management API",
   "type": "module",
   "license": "MIT",
@@ -13,12 +13,17 @@
     },
     "./src/*": "./src/*",
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
   },
   "files": [
     "lib",
     "cordis.patch.yml",
-    "README.zh.md"
+    "README.zh.md",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
   ],
   "scripts": {
     "build": "tsc -b tsconfig.build.json",

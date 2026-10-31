@@ -35,14 +35,14 @@
 bundle 清单（`cordis.patch.yml` 随包发布），因此既可以作为普通插件依赖挂载，也可以作为 profile bundle 挂载。
 
 ```bash
-dsh plugin --profile <profile> add @joshryandavis/dsh-llm-kiro
+dsh plugin --profile <profile> add dsh-llm-kiro-local
 ```
 
 在 `cordis.yml` 中挂载：
 
 ```yaml
 - id: llm-kiro
-  name: '@joshryandavis/dsh-llm-kiro'
+  name: 'dsh-llm-kiro-local'
   config:
     region: us-east-1        # 可选；省略时以凭据的区域为准
     reasoningEffort: high    # 可选；off | low | medium | high | xhigh | max（默认 high）
@@ -53,7 +53,7 @@ dsh plugin --profile <profile> add @joshryandavis/dsh-llm-kiro
 
 ```yaml
 - id: llm-kiro
-  name: '@joshryandavis/dsh-llm-kiro'
+  name: 'dsh-llm-kiro-local'
   config:
     bearerTokenEnv: KIRO_BEARER_TOKEN   # 通过 harness 凭据服务存储
 ```
