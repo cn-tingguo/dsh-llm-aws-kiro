@@ -68,6 +68,7 @@ export function getKiroRegionFromEndpoint(endpoint: string): string | undefined 
     if ((service === 'management' || service === 'runtime') && domain === 'kiro.dev') return region
     return undefined
   } catch {
+    // Not a parseable URL: the caller falls back to the configured region.
     return undefined
   }
 }

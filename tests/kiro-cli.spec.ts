@@ -222,7 +222,7 @@ describe('llm-kiro kiro-cli store', () => {
     expect(await refreshViaKiroCli({ dbPath })).toMatchObject({ access: 'idc-access' })
     const [file, args, options] = execFileMock.mock.calls[1] as [string, string[], { timeout: number }]
     expect(file).toBe('kiro-cli')
-    expect(args).toEqual(['debug', 'refresh-auth-token'])
+    expect(args).toEqual(['whoami', '--format', 'json'])
     expect(options.timeout).toBe(KIRO_CLI_REFRESH_TIMEOUT_MS)
   })
 

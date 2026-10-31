@@ -285,6 +285,7 @@ export function parseManagementCache(raw: string): ManagementModelsCache | undef
   try {
     value = JSON.parse(raw)
   } catch {
+    // Corrupt JSON on disk: the caller re-fetches rather than trusting it.
     return undefined
   }
   if (
@@ -329,6 +330,7 @@ export function readManagementCache(): ManagementModelsCache | undefined {
   try {
     return parseManagementCache(readFileSync(cachePath, 'utf-8'))
   } catch {
+    // Unreadable or unparseable cache file: behave as if no cache existed.
     return undefined
   }
 }

@@ -169,6 +169,8 @@ function parseToolArguments(block: ToolCallBlock): Record<string, unknown> {
       ? parsed as Record<string, unknown>
       : {}
   } catch {
+    // The model emitted arguments that are not JSON: send an empty object so
+    // the tool call still reaches the runtime instead of failing the turn.
     return {}
   }
 }

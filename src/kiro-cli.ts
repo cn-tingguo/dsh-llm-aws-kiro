@@ -56,6 +56,7 @@ function getNodeSqlite(): typeof import('node:sqlite') | undefined {
   try {
     return require('node:sqlite') as typeof import('node:sqlite')
   } catch {
+    // Older runtimes without node:sqlite: the sqlite3 CLI fallback covers them.
     return undefined
   }
 }
@@ -92,6 +93,7 @@ export function queryKiroCliDb(dbPath: string, sql: string): string | undefined 
     }).trim()
     return result === '[]' ? undefined : result || undefined
   } catch {
+    // sqlite3 missing, the file unreadable, or the query rejected: no rows.
     return undefined
   }
 }
@@ -127,6 +129,7 @@ export function execKiroCliDb(dbPath: string, sql: string): boolean {
     })
     return true
   } catch {
+    // Write-back is best effort: a closed or read-only store just keeps its old row.
     return false
   }
 }
@@ -224,6 +227,7 @@ export function getKiroCliCredentials(paths?: KiroStorePaths): KiroCredentials |
     if (idcCreds) return idcCreds
     return tryKiroCliToken(dbPath, 'kirocli:social:token', 'desktop')
   } catch {
+    // Unreadable store: ambient pickup has nothing to offer this request.
     return undefined
   }
 }
@@ -243,6 +247,7 @@ export function getKiroCliCredentialsAllowExpired(paths?: KiroStorePaths): KiroC
     if (idcCreds) return idcCreds
     return tryKiroCliToken(dbPath, 'kirocli:social:token', 'desktop', true)
   } catch {
+    // Unreadable store: the refresh chain moves on to its next layer.
     return undefined
   }
 }
@@ -309,6 +314,7 @@ export function getKiroIdeCredentials(allowExpired: boolean, paths?: KiroStorePa
       authMethod: 'idc',
     }
   } catch {
+    // Malformed or incomplete token row: treat it as no credential at all.
     return undefined
   }
 }
@@ -364,10 +370,15 @@ export function saveKiroCliCredentials(creds: KiroCredentials, paths?: KiroStore
  */
 export async function refreshViaKiroCli(paths?: KiroStorePaths): Promise<KiroCredentials | undefined> {
   try {
-    await runKiroCli(['debug', 'refresh-auth-token'], KIRO_CLI_REFRESH_TIMEOUT_MS)
+    // `kiro-cli whoami` reads the live session and refreshes an expired access
+    // token as a side effect of authenticating the call. The older
+    // `kiro-cli debug refresh-auth-token` subcommand no longer exists in 2.36
+    // and returned exit 2 every time, so this layer never actually ran.
+    await runKiroCli(['whoami', '--format', 'json'], KIRO_CLI_REFRESH_TIMEOUT_MS)
     return getKiroCliCredentials(paths)
   } catch {
-    // kiro-cli missing, timed out, or failed: this layer has nothing to offer.
+    // kiro-cli missing, timed out, rejected the session, or still holds an
+    // expired token: this layer has nothing usable to offer.
     return undefined
   }
 }
