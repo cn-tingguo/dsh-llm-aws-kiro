@@ -11,10 +11,11 @@ import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'nod
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { getKiroEndpoints } from './endpoints.ts'
-import type { KiroListAvailableModelsResponse, KiroListAvailableProfilesResponse, KiroManagementAuth } from './types.ts'
+import type { KiroListAvailableModelsResponse, KiroListAvailableProfilesResponse, KiroManagementAuth, KiroUsageLimitsResponse } from './types.ts'
 
 const LIST_PROFILES_PATH = 'List-Available-Profiles'
 const LIST_MODELS_PATH = 'List-Available-Models'
+const GET_USAGE_LIMITS_PATH = 'GetUsageLimits'
 
 /** Management request timeout; one unreachable regional endpoint must not stall a request. */
 const MANAGEMENT_TIMEOUT_MS = 20_000
@@ -222,6 +223,55 @@ export async function listAvailableModels(
     throw new Error(`Kiro management ListAvailableModels returned an invalid catalog in ${auth.region}`)
   }
   return response
+}
+
+/**
+ * Fetch the account's usage limits for one profile.
+ *
+ * The runtime stream never reports a remaining balance, so a quota rejection
+ * on the request path carries no numbers on its own. This management call is
+ * the only source of "used X of Y", and it is read lazily — only when a quota
+ * error needs context — so it never sits on the hot path.
+ * @param auth - the credential facts.
+ * @param profileArn - the resolved profile ARN.
+ * @returns the usage-limits response.
+ */
+export async function fetchKiroUsageLimits(
+  auth: KiroManagementAuth,
+  profileArn: string,
+): Promise<KiroUsageLimitsResponse> {
+  return requestManagement<KiroUsageLimitsResponse>(
+    auth,
+    'GetUsageLimits',
+    GET_USAGE_LIMITS_PATH,
+    'GET',
+    { profileArn },
+  )
+}
+
+/**
+ * Render a usage-limits response as one human-readable line, or undefined when
+ * it carries no usable credit figures.
+ * @param usage - a GetUsageLimits response.
+ * @returns e.g. "4228 of 5000 Credits used, resets 2026-11-01", or undefined.
+ */
+export function describeKiroUsage(usage: KiroUsageLimitsResponse): string | undefined {
+  const credit = usage.usageBreakdownList?.find(
+    entry => typeof entry.usageLimit === 'number' && typeof (entry.currentUsageWithPrecision ?? entry.currentUsage) === 'number',
+  )
+  if (credit === undefined) return undefined
+  const used = credit.currentUsageWithPrecision ?? credit.currentUsage
+  const label = credit.displayNamePlural ?? credit.displayName ?? 'credits'
+  const limit = credit.usageLimit
+  const reset = typeof usage.nextDateReset === 'number'
+    ? new Date(usage.nextDateReset * 1000).toISOString().slice(0, 10)
+    : undefined
+  const plan = usage.subscriptionInfo?.subscriptionTitle
+  const core = `${used} of ${limit} ${label} used`
+  return [
+    plan !== undefined ? `${plan}: ${core}` : core,
+    reset !== undefined ? `resets ${reset}` : undefined,
+  ].filter(Boolean).join(', ')
 }
 
 /**

@@ -10,6 +10,7 @@
 import { APP_IDENTITY, LlmError, attributionHeaders } from '@deepseek-ai/dsh-llm'
 import { getKiroEndpoints } from './endpoints.ts'
 import { decodeKiroEventStream } from './eventstream.ts'
+import { describeKiroUsage, fetchKiroUsageLimits } from './management.ts'
 import type { KiroCredentials, KiroRequest, KiroStreamEvent } from './types.ts'
 
 /** How many times a capacity rejection is retried with backoff before giving up. */
@@ -168,11 +169,25 @@ export async function* streamKiroEvents(options: KiroTransportOptions): AsyncGen
       await abortableDelay(delayMs, options.signal)
       continue
     }
-    throw new LlmError(
-      `Kiro API error: ${errorText || response.statusText || response.status}`,
-      httpErrorCode(response.status, errorText),
-      { status: response.status },
-    )
+    const code = httpErrorCode(response.status, errorText)
+    let message = `Kiro API error: ${errorText || response.statusText || response.status}`
+    if (code === 'QUOTA') {
+      // A quota rejection carries no balance on the wire. Read the limits once,
+      // here only, so the user sees how much is left and when it resets. The
+      // lookup is best effort and bounded by the management timeout: if it
+      // fails, the original quota error stands.
+      try {
+        const usage = await fetchKiroUsageLimits(
+          { accessToken: options.credential.access, region: options.credential.region },
+          options.profileArn,
+        )
+        const summary = describeKiroUsage(usage)
+        if (summary !== undefined) message = `${message} (${summary})`
+      } catch {
+        // Keep the bare quota error when the usage lookup is unavailable.
+      }
+    }
+    throw new LlmError(message, code, { status: response.status })
   }
 
   if (!response.ok || !response.body) {

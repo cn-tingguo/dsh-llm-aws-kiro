@@ -152,6 +152,30 @@ export interface KiroListAvailableProfilesResponse {
   profiles?: Array<{ arn?: string; [key: string]: unknown }>
 }
 
+/** One resource's usage line in a GetUsageLimits response. */
+export interface KiroUsageBreakdown {
+  /** Resource label, e.g. "Credit". */
+  displayName?: string
+  /** Plural resource label, e.g. "Credits". */
+  displayNamePlural?: string
+  /** Consumed amount in whole units. */
+  currentUsage?: number
+  /** Consumed amount with sub-unit precision. */
+  currentUsageWithPrecision?: number
+  /** The period's allowance. */
+  usageLimit?: number
+  [key: string]: unknown
+}
+
+/** Response of the GetUsageLimits management operation (subset used here). */
+export interface KiroUsageLimitsResponse {
+  /** Epoch seconds when the allowance resets. */
+  nextDateReset?: number
+  subscriptionInfo?: { subscriptionTitle?: string; [key: string]: unknown }
+  usageBreakdownList?: KiroUsageBreakdown[]
+  [key: string]: unknown
+}
+
 /** Auth facts one management operation needs. */
 export interface KiroManagementAuth {
   accessToken: string

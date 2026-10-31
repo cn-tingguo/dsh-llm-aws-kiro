@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   KiroManagementHttpError,
+  describeKiroUsage,
+  fetchKiroUsageLimits,
   listAvailableModels,
   parseManagementCache,
   resetKiroProfileArnCache,
@@ -141,5 +143,33 @@ describe('llm-kiro management', () => {
       source: 'other-tool',
       regions: {},
     }))).toBeUndefined()
+  })
+
+  it('fetches usage limits with the profile ARN as a query parameter', async () => {
+    const calls: string[] = []
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      calls.push(String(input))
+      return new Response(JSON.stringify({ usageBreakdownList: [] }), { status: 200 })
+    })
+    try {
+      await fetchKiroUsageLimits(auth, 'arn:profile:1')
+      expect(calls).toHaveLength(1)
+      const url = new URL(calls[0]!)
+      expect(url.pathname).toContain('GetUsageLimits')
+      expect(url.searchParams.get('profileArn')).toBe('arn:profile:1')
+    } finally {
+      fetchSpy.mockRestore()
+    }
+  })
+
+  it('renders a usage summary and skips one with no credit figures', () => {
+    expect(describeKiroUsage({
+      subscriptionInfo: { subscriptionTitle: 'KIRO PRO MAX' },
+      nextDateReset: 1793491200,
+      usageBreakdownList: [{ displayNamePlural: 'Credits', currentUsageWithPrecision: 4228.09, usageLimit: 5000 }],
+    })).toBe('KIRO PRO MAX: 4228.09 of 5000 Credits used, resets 2026-11-01')
+    // No breakdown with both a limit and a usage figure: nothing to report.
+    expect(describeKiroUsage({ usageBreakdownList: [{ displayName: 'Credit' }] })).toBeUndefined()
+    expect(describeKiroUsage({})).toBeUndefined()
   })
 })
