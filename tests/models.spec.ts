@@ -3,6 +3,7 @@
  * and the shared management cache. The cache path derives from os.homedir(),
  * which this spec stubs to a temp directory.
  */
+import { writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -31,7 +32,7 @@ import {
   updateKiroModelsCache,
 } from '../src/models.ts'
 import type { KiroModel } from '../src/models.ts'
-import { readManagementCache } from '../src/management.ts'
+import { getKiroManagementCachePath, readManagementCache } from '../src/management.ts'
 import type { KiroCatalogModel } from '../src/types.ts'
 
 let home: string | undefined
@@ -122,6 +123,33 @@ describe('llm-kiro models', () => {
     expect(() => mapKiroCatalogModels([{ modelId: 'a', additionalModelRequestFieldsSchema: 'bad' }], 'us-east-1')).toThrow('invalid request-fields schema')
     expect(() => mapKiroCatalogModels([{ modelId: 'a', tokenLimits: 'bad' }], 'us-east-1')).toThrow('invalid token limits')
     expect(() => mapKiroCatalogModels([{ modelId: 'a', tokenLimits: { maxInputTokens: -1 } }], 'us-east-1')).toThrow('invalid token limits')
+  })
+
+  it('keeps a fetched catalog for eight hours before refetching', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('List-Available-Profiles')) {
+        return new Response(JSON.stringify({ profiles: [{ arn: 'arn:1' }] }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ models: [catalogModel('claude-sonnet-4.6')] }), { status: 200 })
+    }))
+    await updateKiroModelsCache('token', 'eu-west-1')
+
+    const ageBy = (hours: number): void => {
+      const cache = readManagementCache()!
+      cache.regions['eu-west-1'] = {
+        ...cache.regions['eu-west-1']!,
+        fetchedAt: Date.now() - hours * 60 * 60 * 1000,
+      }
+      writeFileSync(getKiroManagementCachePath(), JSON.stringify(cache))
+    }
+
+    // The old one-hour window refetched long before the menu could change.
+    ageBy(1)
+    expect(isCacheStale('eu-west-1')).toBe(false)
+    ageBy(7.9)
+    expect(isCacheStale('eu-west-1')).toBe(false)
+    ageBy(8.1)
+    expect(isCacheStale('eu-west-1')).toBe(true)
   })
 
   it('caches the authenticated catalog per region and serves it', async () => {

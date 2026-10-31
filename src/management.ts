@@ -40,8 +40,15 @@ export const KIRO_MANAGEMENT_CACHE_SOURCE = 'kiro-management'
  */
 const READABLE_CACHE_VERSIONS = new Set<number>([1, KIRO_MANAGEMENT_CACHE_VERSION])
 
-/** Cache TTL before the catalog is re-fetched. */
-const CACHE_MAX_AGE_MS = 3600_000
+/**
+ * Cache TTL before the catalog is re-fetched.
+ *
+ * Eight hours: the catalog changes when the account's model menu changes,
+ * which is rare, while a refetch costs a management round trip on the request
+ * path. The cost of staleness is that a newly added model appears only after
+ * the next refresh, and the cost of a short TTL is a slower first request.
+ */
+const CACHE_MAX_AGE_MS = 8 * 60 * 60 * 1000
 
 /** One region's cached catalog. */
 export interface ManagementCacheRegion {
