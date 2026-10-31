@@ -90,6 +90,21 @@ describe('llm-kiro refresh', () => {
     })
   })
 
+  it('coalesces concurrent refreshes of the same credential into one request', async () => {
+    // Refreshing rotates the refresh token, so parallel calls would race and
+    // leave the losers holding a token the server no longer accepts.
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      accessToken: 'shared-access',
+      refreshToken: 'shared-refresh',
+      expiresIn: 3600,
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const results = await Promise.all(Array.from({ length: 5 }, () => refreshKiroToken(idcCreds)))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(new Set(results.map(result => result.access))).toEqual(new Set(['shared-access']))
+  })
+
   it('refreshes a desktop token through the Kiro desktop endpoint', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       accessToken: 'fresh-access',

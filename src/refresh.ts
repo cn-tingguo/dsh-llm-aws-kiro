@@ -23,6 +23,12 @@ export const REFRESH_TIMEOUT_MS = 20_000
 /** Kiro desktop auth refresh endpoint template; {region} is the API region. */
 export const KIRO_DESKTOP_REFRESH_URL = 'https://prod.{region}.auth.desktop.kiro.dev/refreshToken'
 
+/**
+ * In-flight refreshes keyed by the packed refresh string, which identifies the
+ * account, client registration, and auth method together.
+ */
+const pendingRefreshes = new Map<string, Promise<KiroCredentials>>()
+
 /** The AWS SSO OIDC token endpoint for one region. */
 function oidcTokenEndpoint(region: string): string {
   return `https://oidc.${region}.amazonaws.com/token`
@@ -48,11 +54,40 @@ interface DesktopRefreshResponse {
 /**
  * Refresh one credential through its own transport. The packed `refresh`
  * string carries the refresh token and, for IDC, the client registration.
+ *
+ * Concurrent callers for the same credential share one in-flight request.
+ * Refreshing rotates the refresh token, so two parallel requests would race:
+ * the later response invalidates the earlier one, and whichever caller lost
+ * the race would hold a token the server no longer accepts. Coalescing keeps
+ * one rotation per credential, matching how profile resolution already
+ * coalesces.
  * @param credentials - the credential facts to refresh.
  * @returns the refreshed credential facts.
  * @throws Error when the refresh endpoint rejects the request.
  */
 export async function refreshKiroToken(credentials: KiroCredentials): Promise<KiroCredentials> {
+  const key = credentials.refresh
+  const inFlight = pendingRefreshes.get(key)
+  if (inFlight !== undefined) return inFlight
+
+  const request = refreshKiroTokenUncoalesced(credentials)
+  pendingRefreshes.set(key, request)
+  try {
+    return await request
+  } finally {
+    // Only the owner clears the entry, so a late joiner cannot delete a newer
+    // in-flight request that started after this one settled.
+    if (pendingRefreshes.get(key) === request) pendingRefreshes.delete(key)
+  }
+}
+
+/**
+ * Perform one refresh without coalescing.
+ * @param credentials - the credential facts to refresh.
+ * @returns the refreshed credential facts.
+ * @throws Error when the refresh endpoint rejects the request.
+ */
+async function refreshKiroTokenUncoalesced(credentials: KiroCredentials): Promise<KiroCredentials> {
   const parts = credentials.refresh.split('|')
   const refreshToken = parts[0] ?? ''
   const authMethod = (parts[parts.length - 1] ?? 'idc') as KiroCredentials['authMethod']

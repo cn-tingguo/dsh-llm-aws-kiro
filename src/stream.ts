@@ -190,12 +190,23 @@ export async function* streamKiroEvents(options: KiroTransportOptions): AsyncGen
   const endpoint = options.endpoint ?? new URL('generateAssistantResponse', getKiroEndpoints(options.credential.region).runtime).toString()
   let capacityRetryCount = 0
   let response: Response | undefined
+  /** Transport controller for the current attempt; aborted on generator exit. */
+  let transport: AbortController | undefined
 
   while (true) {
     const body = JSON.stringify({ ...options.request, profileArn: options.profileArn })
     // One identity per request: the backend reads the same app token from
     // both headers, so they must carry the same value.
     const ua = kiroUserAgent()
+    // Own the transport lifetime: the fetch is bound to this controller so the
+    // generator can tear the connection down on any early exit. Cancelling the
+    // body directly is not enough, because the event-stream marshaller holds
+    // the reader and a locked stream rejects `body.cancel()`.
+    transport = new AbortController()
+    if (options.signal !== undefined) {
+      if (options.signal.aborted) transport.abort(options.signal.reason)
+      else options.signal.addEventListener('abort', () => transport?.abort(options.signal?.reason), { once: true })
+    }
     response = await fetch(endpoint, {
       method: 'POST',
       headers: {
@@ -210,7 +221,7 @@ export async function* streamKiroEvents(options: KiroTransportOptions): AsyncGen
         'x-amz-user-agent': ua,
       },
       body,
-      ...(options.signal !== undefined ? { signal: options.signal } : {}),
+      signal: transport.signal,
     })
     if (response.ok) break
 
@@ -296,6 +307,11 @@ export async function* streamKiroEvents(options: KiroTransportOptions): AsyncGen
       yield event
     }
   } finally {
-    // The event source owns the body reader; dropping the iterator closes it.
+    // Abort the transport so an early exit (caller abort, first-token timeout,
+    // or a thrown error) tears down the HTTP response instead of leaving it
+    // open until the runtime finishes sending. Aborting the fetch signal is the
+    // reliable path: the event-stream marshaller holds the body reader, and a
+    // locked stream rejects `body.cancel()`.
+    transport?.abort()
   }
 }
