@@ -74,6 +74,8 @@ const BOOTSTRAP: Array<Omit<KiroModel, 'kiroModelId' | 'inputModalities'> & { in
   { id: 'claude-opus-4-6', kiroModelId: 'claude-opus-4.6', name: 'Claude Opus 4.6', reasoning: true, contextWindow: ZERO_CONTEXT_WINDOW, maxTokens: 64000 },
   { id: 'claude-opus-4-5', kiroModelId: 'claude-opus-4.5', name: 'Claude Opus 4.5', reasoning: true, contextWindow: 200000, maxTokens: 64000 },
   { id: 'claude-sonnet-5', kiroModelId: 'claude-sonnet-5', name: 'Claude Sonnet 5', reasoning: true, contextWindow: ZERO_CONTEXT_WINDOW, maxTokens: 64000 },
+  { id: 'claude-sonnet-5-5', kiroModelId: 'claude-sonnet-5.5', name: 'Claude Sonnet 5.5', reasoning: true, contextWindow: ZERO_CONTEXT_WINDOW, maxTokens: 64000 },
+  { id: 'claude-haiku-5-5', kiroModelId: 'claude-haiku-5.5', name: 'Claude Haiku 5.5', reasoning: true, contextWindow: ZERO_CONTEXT_WINDOW, maxTokens: 64000 },
   { id: 'claude-sonnet-4-6', kiroModelId: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6', reasoning: true, contextWindow: ZERO_CONTEXT_WINDOW, maxTokens: 64000 },
   { id: 'claude-sonnet-4-5', kiroModelId: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true, contextWindow: 200000, maxTokens: 64000 },
   { id: 'claude-sonnet-4', kiroModelId: 'claude-sonnet-4', name: 'Claude Sonnet 4', reasoning: true, contextWindow: 200000, maxTokens: 64000 },
