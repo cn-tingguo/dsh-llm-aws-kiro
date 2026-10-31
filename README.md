@@ -165,26 +165,50 @@ Tests resolve the harness packages from the published `@deepseek-ai/*` packages 
 they exercise the exact published APIs. Credential tests are fully isolated from the host
 machine's real kiro-cli / Kiro IDE stores.
 
-## Known limitations and deferred work
+## Known limitations
 
-- **Interactive login** is not bundled: with no ambient credentials the provider fails with
-  `MISSING_CREDENTIAL` and points at `kiro-cli login` or the Kiro IDE. A device-code flow can be
-  added later on the management seam.
-- **A cost badge beside the model name is not implemented.** The composer renders
-  `conversation.input.model.label`, and a Client half was written for it following the shape of the
-  official model-label plugin, but its registration never took effect on a link-installed package:
-  the entry imported without failing boot and the slot kept only its built-in occupant. The cost
-  therefore rides in the model name. Diagnosing it needs the browser console, which is not available
-  from the Host.
-- **Legacy inline thinking dialect**: reasoning arrives through the native `thinkingText` events;
-  models that emit `<thinking>` tags inside content keep them in the visible text block.
-- **Replay state** is not emitted; history is resent as provider-neutral content on follow-ups.
+A genuine gap, worth fixing if it ever matters:
+
+- **Interactive login is not bundled.** With no ambient credentials the provider fails with
+  `MISSING_CREDENTIAL` and points at `kiro-cli login` or the Kiro IDE. A device-code flow could be
+  added on the management seam. The guidance covers the normal case, so this is a convenience gap,
+  not a blocker.
+
+## Deferred and deliberately not done
+
+Each of these was evaluated and left alone. They are recorded so nobody re-opens them expecting a
+bug.
+
+- **A cost badge beside the model name.** The composer renders `conversation.input.model.label`, and
+  a Client half was written for it following the shape of the official model-label plugin, but its
+  registration never took effect on a link-installed package: the entry imported without failing
+  boot, yet the slot kept only its built-in occupant. The multiplier therefore rides in the model
+  name. Three implementations were tried; diagnosing further needs the browser console, which the
+  Host cannot reach. The visible cost is equivalent — only the styling differs.
+- **Replay state is not emitted.** History is resent as provider-neutral content on follow-ups. This
+  is a design choice matching the other adapters, not a limitation: the Kiro backend does not ask
+  for replay state.
 - **The catalog refresh is pull-based, not scheduled.** Reading the model list serves the cached or
-  bootstrap catalog and refreshes the cache for the next read, so a newly enabled model appears only
-  after the next refresh — at most eight hours after the catalog changes.
-- **A model is only as fresh as the last successful refresh.** Because the bootstrap list no longer
-  carries the newest entries (a deliberate choice, so the catalog stays authoritative), a cache that
-  is missing or stale hides those models until a refresh succeeds.
+  bootstrap catalog and refreshes the cache for the next read, so a newly enabled model appears
+  after the next refresh — at most eight hours after the catalog changes. Scheduling it would add a
+  timer and a failure path for a menu that rarely moves.
+- **A model is only as fresh as the last successful refresh.** The bootstrap list deliberately does
+  not carry the newest entries, so the catalog stays authoritative; a cache that is missing or stale
+  hides those models until a refresh succeeds. Serving stale-but-present data instead would need the
+  retirement rule to also reason about age, which is a larger change than the case justifies.
+
+## Verified behaviour that is sometimes assumed broken
+
+Measured on kiro-cli 2.36.0, not assumed:
+
+- **Reasoning arrives as native events.** `thinkingText` and `thinkingSignature` carry it; a model
+  that dispatches internally (such as `auto`) emits no reasoning event at all rather than inlining
+  `<thinking>` tags into visible content. No inline dialect was observed on any tested model.
+- **Every refresh transport is bounded.** AWS SSO OIDC, the Kiro desktop auth service, and the
+  `kiro-cli whoami` fallback each run under a timeout, so a hung auth endpoint fails the layer
+  instead of stalling the turn.
+- **Retired models are dropped, not offered.** An entry the authenticated catalog no longer lists is
+  removed once a catalog has been read; with no catalog yet, nothing is treated as retired.
 
 ## License
 
