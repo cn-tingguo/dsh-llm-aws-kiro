@@ -163,22 +163,22 @@ function formatRateMultiplier(rate: number): string {
  * @param model - the served catalog entry.
  * @returns the cost text, or undefined when the catalog priced nothing.
  */
-function modelCost(model: KiroModel): string | undefined {
+function modelMultiplier(model: KiroModel): string | undefined {
   const rate = model.rateMultiplier
   if (rate === undefined || !Number.isFinite(rate)) return undefined
-  return `${formatRateMultiplier(rate)}x credit`
+  return `${formatRateMultiplier(rate)}x`
 }
 
 function modelInfo(provider: string, model: KiroModel): LlmModelInfo {
-  const cost = modelCost(model)
+  const multiplier = modelMultiplier(model)
   return {
     provider,
     id: model.id,
-    // The composer renders only `name` for a model without a Client-side label
-    // contribution, so the cost rides in the name itself. `description` still
-    // carries it for any surface that reads it.
-    name: cost === undefined ? model.name : `${model.name} · ${formatRateMultiplier(model.rateMultiplier as number)}x`,
-    ...(cost !== undefined ? { description: cost } : {}),
+    // The composer renders only `name`, so the cost rides in the name itself;
+    // `description` carries the spelled-out form for surfaces that read it.
+    ...(multiplier === undefined
+      ? { name: model.name }
+      : { name: `${model.name} · ${multiplier}`, description: `${multiplier} credit` }),
     inputModalities: model.inputModalities,
   }
 }

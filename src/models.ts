@@ -258,6 +258,23 @@ export function getCachedModels(region: string): KiroModel[] {
 }
 
 /**
+ * Whether the authenticated catalog for one region is actually available.
+ *
+ * `getCachedModels` falls back to the bootstrap list when no cache exists, so
+ * its result alone cannot tell "the account offers these" from "nothing was
+ * fetched yet". Retiring a model needs that distinction: an absent cache must
+ * never hide a model, while an authenticated list that omits one is evidence
+ * the account no longer offers it.
+ *
+ * @param region - the Kiro API region.
+ * @returns true when a cache entry for the region was read.
+ */
+export function hasAuthenticatedCatalog(region: string): boolean {
+  const entry = readManagementCache()?.regions[region]
+  return entry !== undefined && Array.isArray(entry.models) && entry.models.length > 0
+}
+
+/**
  * Merge the authenticated catalog over the configured or bootstrap list. A
  * discovered entry replaces the metadata of the same harness id but keeps the
  * base list's position, and an id the base list has never seen is appended, so
@@ -275,6 +292,27 @@ export function mergeKiroModels(base: readonly KiroModel[], discovered: readonly
     if (!knownIds.has(model.id)) merged.push(model)
   }
   return merged
+}
+
+/**
+ * Drop base entries the authenticated catalog no longer offers.
+ *
+ * Only entries carrying no authenticated data are at risk of being gone: a
+ * model the catalog still lists is refreshed by {@link mergeKiroModels}, and a
+ * model it never listed cannot be judged. A base entry the catalog omits is a
+ * retired model, and keeping it would offer a choice the runtime rejects.
+ *
+ * @param base - the configured or bootstrap list.
+ * @param discovered - the authenticated catalog, when one was read.
+ * @returns the base list without entries the account no longer serves.
+ */
+export function withoutRetiredModels(
+  base: readonly KiroModel[],
+  discovered: readonly KiroModel[],
+): KiroModel[] {
+  if (discovered.length === 0) return [...base]
+  const offered = new Set(discovered.map(model => model.id))
+  return base.filter(model => offered.has(model.id))
 }
 
 /** The discovery policy and catalog one connection resolves its models from. */
@@ -296,10 +334,17 @@ export interface KiroModelSource {
  */
 export function servedKiroModels(source: KiroModelSource): readonly KiroModel[] {
   if (source.discoverModels !== true) return source.models
+  const region = resolveApiRegion(source.region)
   // Discovery merges the authenticated catalog in; that is where multipliers
   // come from, so the picker order is applied to the merged list only. An
   // explicit list keeps the order its author chose.
-  return orderKiroModels(mergeKiroModels(source.models, getCachedModels(resolveApiRegion(source.region))))
+  if (!hasAuthenticatedCatalog(region)) {
+    return orderKiroModels(mergeKiroModels(source.models, getCachedModels(region)))
+  }
+  // With a real catalog in hand, an entry it omits is retired rather than
+  // merely unrefreshed, so the picker stops offering a model that would fail.
+  const discovered = getCachedModels(region)
+  return orderKiroModels(mergeKiroModels(withoutRetiredModels(source.models, discovered), discovered))
 }
 
 /**

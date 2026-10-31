@@ -23,6 +23,8 @@ import {
   mapKiroCatalogModels,
   mergeKiroModels,
   orderKiroModels,
+  hasAuthenticatedCatalog,
+  withoutRetiredModels,
   resolveKiroModelId,
   servedKiroModels,
   toHarnessModelId,
@@ -143,6 +145,11 @@ describe('llm-kiro models', () => {
     vi.unstubAllGlobals()
   })
 
+  it('distinguishes an absent catalog from the bootstrap fallback', () => {
+    // getCachedModels falls back to bootstrap, so presence is judged separately.
+    expect(hasAuthenticatedCatalog('no-such-region')).toBe(false)
+  })
+
   it('serves the bootstrap catalog before discovery and tolerates cache corruption', async () => {
     expect(getCachedModels('ap-southeast-1')).toEqual(bootstrapKiroModels)
     const { writeFileSync } = await import('node:fs')
@@ -243,6 +250,25 @@ describe('llm-kiro models', () => {
     expect(isCacheStale('ap-southeast-2')).toBe(false)
     expect(resolveKiroModelId('brand-new-model')).toBe('brand-new-model')
     expect(KIRO_MODEL_IDS.has('brand-new-model')).toBe(true)
+  })
+
+  it('retires a bootstrap entry the authenticated catalog no longer offers', () => {
+    const entry = (id: string, rateMultiplier?: number): KiroModel => ({
+      id,
+      kiroModelId: id,
+      name: id,
+      reasoning: false,
+      contextWindow: 200_000,
+      maxTokens: 8_192,
+      inputModalities: ['text'],
+      ...(rateMultiplier !== undefined ? { rateMultiplier } : {}),
+    })
+    const base = [entry('kept', 1), entry('retired')]
+    const discovered = [entry('kept', 1.3), entry('added', 0.5)]
+    // An entry the account still serves survives; one it dropped does not.
+    expect(withoutRetiredModels(base, discovered).map(model => model.id)).toEqual(['kept'])
+    // Without an authenticated catalog nothing is judged retired.
+    expect(withoutRetiredModels(base, []).map(model => model.id)).toEqual(['kept', 'retired'])
   })
 
   it('serves the newest authenticated models even before the catalog is cached', () => {

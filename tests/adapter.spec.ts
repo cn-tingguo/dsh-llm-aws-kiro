@@ -382,9 +382,9 @@ describe('llm-kiro adapter stream', () => {
     expect(byId.get('glm-5')?.name).toBe('GLM 5 · 0.5x')
     expect(byId.get('glm-5')?.description).toBe('0.5x credit')
     expect(byId.get('auto')?.name).toBe('Auto · 1x')
-    // An unpriced model gets no fabricated multiplier.
-    expect(byId.get('claude-sonnet-4')?.name).toBe('Claude Sonnet 4')
-    expect(byId.get('claude-sonnet-4')?.description).toBeUndefined()
+    // The authenticated catalog does not list this entry, so it is retired
+    // rather than served without a price.
+    expect(byId.has('claude-sonnet-4')).toBe(false)
   })
 
   it('refreshes the served catalog from discovery and warms it when the list is read', async () => {
