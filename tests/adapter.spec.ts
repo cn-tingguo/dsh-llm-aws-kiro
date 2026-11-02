@@ -397,13 +397,27 @@ describe('llm-kiro adapter stream', () => {
       }),
     }).listModels('kiro')
     const byId = new Map(models.map(model => [model.id, model]))
-    // The composer renders only `name`, so the cost rides there.
-    expect(byId.get('glm-5')?.name).toBe('GLM 5 · 0.5x')
+    // The composer renders only `name`, so both the provider tag and the cost
+    // ride there; `description` keeps the spelled-out cost.
+    expect(byId.get('glm-5')?.name).toBe('[Kiro] GLM 5 · 0.5x')
     expect(byId.get('glm-5')?.description).toBe('0.5x credit')
-    expect(byId.get('auto')?.name).toBe('Auto · 1x')
+    expect(byId.get('auto')?.name).toBe('[Kiro] Auto · 1x')
     // The authenticated catalog does not list this entry, so it is retired
     // rather than served without a price.
     expect(byId.has('claude-sonnet-4')).toBe(false)
+  })
+
+  it('tags an unpriced model with the provider too', async () => {
+    const models = await adapter({
+      options: () => connection({
+        models: [
+          { id: 'house-model', kiroModelId: 'house-model', name: 'House Model', reasoning: false, contextWindow: 200_000, maxTokens: 8_192, inputModalities: ['text'] },
+        ],
+      }),
+    }).listModels('kiro')
+    // No multiplier to append, but the provider tag still applies.
+    expect(models[0]?.name).toBe('[Kiro] House Model')
+    expect(models[0]?.description).toBeUndefined()
   })
 
   it('refreshes the served catalog from discovery and warms it when the list is read', async () => {

@@ -169,16 +169,37 @@ function modelMultiplier(model: KiroModel): string | undefined {
   return `${formatRateMultiplier(rate)}x`
 }
 
+/**
+ * Prefix marking which provider a model row belongs to.
+ *
+ * The composer lists every provider's models together and renders only
+ * `name`, so a bare "Auto" or "GPT 5.6 Sol" does not say whose route it is.
+ * Tagging the name is the only place that distinction can appear.
+ */
+const NAME_PREFIX = '[Kiro]'
+
+/**
+ * Compose the display name for one catalog entry.
+ *
+ * Both the provider tag and the credit multiplier ride in `name` because that
+ * is the one field the composer renders; `description` keeps the spelled-out
+ * cost for surfaces that read it.
+ * @param model - the served catalog entry.
+ * @param multiplier - the short cost text, when the catalog priced the model.
+ * @returns the composed display name.
+ */
+function displayName(model: KiroModel, multiplier: string | undefined): string {
+  const tagged = `${NAME_PREFIX} ${model.name}`
+  return multiplier === undefined ? tagged : `${tagged} · ${multiplier}`
+}
+
 function modelInfo(provider: string, model: KiroModel): LlmModelInfo {
   const multiplier = modelMultiplier(model)
   return {
     provider,
     id: model.id,
-    // The composer renders only `name`, so the cost rides in the name itself;
-    // `description` carries the spelled-out form for surfaces that read it.
-    ...(multiplier === undefined
-      ? { name: model.name }
-      : { name: `${model.name} · ${multiplier}`, description: `${multiplier} credit` }),
+    name: displayName(model, multiplier),
+    ...(multiplier === undefined ? {} : { description: `${multiplier} credit` }),
     inputModalities: model.inputModalities,
   }
 }

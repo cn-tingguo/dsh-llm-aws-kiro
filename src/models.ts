@@ -175,9 +175,19 @@ export function toHarnessModelId(kiroModelId: string): string {
   return kiroModelId.replace(/(\d)\.(\d)/g, '$1-$2')
 }
 
-/** Humanize a dashed id into a display name. */
+/**
+ * Humanize a dashed id into a display name.
+ *
+ * Harness ids encode a version's decimal point as a dash
+ * ({@link toHarnessModelId}), so splitting on every dash would render
+ * `claude-haiku-5-5` as "Claude Haiku 5 5". The digit pairs are rejoined with
+ * the point they came from before the words are capitalized.
+ * @param modelId - the dashed harness model id.
+ * @returns the display name.
+ */
 function humanizeModelId(modelId: string): string {
   return modelId
+    .replace(/(\d)-(\d)/g, '$1.$2')
     .split('-')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ')

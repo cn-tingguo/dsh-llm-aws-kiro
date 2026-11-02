@@ -147,8 +147,10 @@ Once an authenticated catalog is present, it is authoritative in two ways:
   without a price, because selecting it would fail at request time. With no catalog fetched yet,
   nothing is treated as retired.
 - **The picker orders by cost.** `auto` comes first, the rest follow in descending credit
-  multiplier, and the multiplier appears in the label (`Claude Sonnet 5 · 1.3x`). A model the
-  catalog did not price keeps its bare name and sorts last.
+  multiplier, and the label carries both the provider tag and the multiplier
+  (`[Kiro] Claude Sonnet 5 · 1.3x`). The tag is there because the composer lists every provider's
+  models together and renders only `name`. A model the catalog did not price keeps its tagged name
+  without a multiplier and sorts last.
 
 The catalog cache at `~/.kiro-management-models-cache.json` is shared with pi-provider-kiro:
 that tool writes format version 1, this provider reads that layout and writes version 2. Entries are

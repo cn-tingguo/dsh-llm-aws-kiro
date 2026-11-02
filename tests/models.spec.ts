@@ -109,6 +109,17 @@ describe('llm-kiro models', () => {
     expect(mapped.find(model => model.id === 'brand-new-model')?.inputModalities).toEqual(['text'])
   })
 
+  it('humanizes an unnamed id without splitting its version number', () => {
+    // The catalog leaves displayName null for these, and the harness id encodes
+    // the version's point as a dash, so a naive split renders "Haiku 5 5".
+    const mapped = mapKiroCatalogModels([
+      catalogModel('claude-haiku-5.5', { displayName: null }),
+      catalogModel('qwen3-coder-next', { displayName: null }),
+    ], 'us-east-1')
+    expect(mapped.find(model => model.id === 'claude-haiku-5-5')?.name).toBe('Claude Haiku 5.5')
+    expect(mapped.find(model => model.id === 'qwen3-coder-next')?.name).toBe('Qwen3 Coder Next')
+  })
+
   it('maps an authenticated catalog, merging bootstrap metadata', () => {
     const mapped = mapKiroCatalogModels([
       catalogModel('claude-sonnet-4.6', { additionalModelRequestFieldsSchema: null }),
