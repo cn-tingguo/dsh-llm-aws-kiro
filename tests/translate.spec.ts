@@ -36,14 +36,19 @@ describe('llm-kiro translate', () => {
     expect(chunks).toContainEqual({ type: 'usage', usage: { inputTokens: 2000, outputTokens: Math.ceil(11 / CHARS_PER_TOKEN) } })
   })
 
-  it('skips repeated content heartbeats and dedupes consecutive identical deltas', async () => {
+  it('keeps every content event, including ones identical to the previous', async () => {
+    // The runtime fragments a stream arbitrarily, so two equal chunks are
+    // ordinary repeated output rather than a heartbeat. Dropping them lost real
+    // text: a ten-line repeat arrived as six.
     const chunks = await collect([
-      { type: 'content', data: 'a' },
-      { type: 'content', data: 'a' },
-      { type: 'content', data: 'a' },
+      { type: 'content', data: 'ok\n' },
+      { type: 'content', data: 'ok\n' },
+      { type: 'content', data: 'ok\n' },
     ])
     const deltas = chunks.filter(chunk => (chunk as { type: string }).type === 'text-delta')
-    expect(deltas).toHaveLength(1)
+    expect(deltas).toHaveLength(3)
+    const text = deltas.map(chunk => (chunk as { text: string }).text).join('')
+    expect(text).toBe('ok\nok\nok\n')
   })
 
   it('translates thinking into a reasoning block closed by the signature', async () => {

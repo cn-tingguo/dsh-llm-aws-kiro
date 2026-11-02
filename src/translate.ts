@@ -56,7 +56,6 @@ export async function* translate(events: AsyncIterable<KiroStreamEvent>, context
   let sawAnyToolCalls = false
   let contextUsagePercentage: number | undefined
   let usageEvent: { inputTokens?: number; outputTokens?: number; credits?: number } | undefined
-  let lastContentData: string | undefined
 
   const open = (kind: OpenBlock['kind']): OpenBlock => {
     const block: OpenBlock = { index: nextIndex++, kind, text: '', closed: false }
@@ -123,9 +122,13 @@ export async function* translate(events: AsyncIterable<KiroStreamEvent>, context
         break
       }
       case 'content': {
-        // The backend may repeat the last content event as a heartbeat.
-        if (event.data === lastContentData) continue
-        lastContentData = event.data
+        // Every content event is new text, even when it repeats the previous
+        // one verbatim: the runtime fragments a stream arbitrarily, so two
+        // identical chunks are ordinary output (a list of "ok" lines, a row of
+        // separators), not a heartbeat. Dropping them lost real text - a
+        // ten-line repeat arrived as six - and shredded genuinely repetitive
+        // output such as the repeated placeholder fragments seen in practice.
+        // Keep-alive lives at the event-stream frame layer, not in content.
         if (!textBlock) {
           textBlock = open('text')
           yield { type: 'block-start', index: textBlock.index, blockType: 'text' }
