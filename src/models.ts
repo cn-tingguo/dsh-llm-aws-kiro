@@ -18,6 +18,7 @@ import {
   KIRO_MANAGEMENT_CACHE_SOURCE,
   KIRO_MANAGEMENT_CACHE_VERSION,
   readManagementCache,
+  type ManagementCacheRegion,
   type ManagementModelsCache,
   writeManagementCache,
 } from './management.ts'
@@ -299,9 +300,21 @@ function refreshKnownModelIds(): void {
 export function getCachedModels(region: string): KiroModel[] {
   const entry = readManagementCache()?.regions[region]
   if (!entry) return [...bootstrapKiroModels]
-  const mapped = mapKiroCatalogModels(entry.models as unknown as KiroCatalogModel[], region)
-  return mapped.length > 0 ? mapped : [...bootstrapKiroModels]
+  let mapped = mappedCatalogs.get(entry)
+  if (mapped === undefined) {
+    mapped = mapKiroCatalogModels(entry.models as unknown as KiroCatalogModel[], region)
+    mappedCatalogs.set(entry, mapped)
+  }
+  return mapped.length > 0 ? [...mapped] : [...bootstrapKiroModels]
 }
+
+/**
+ * Mapped catalogs per parsed cache entry. The management cache memoizes its
+ * parsed document by file identity, so an unchanged file yields the same entry
+ * object and its mapping is reused; a rewritten file yields a new entry and
+ * the old mapping is collected with it.
+ */
+const mappedCatalogs = new WeakMap<ManagementCacheRegion, KiroModel[]>()
 
 /**
  * Whether the authenticated catalog for one region is actually available.
@@ -404,11 +417,13 @@ export async function updateKiroModelsCache(accessToken: string, region: string,
   const response = await fetchKiroModelCatalog({ accessToken, region }, profileArn)
   // The cache stores the raw catalog (wire modelId fields); reads map it.
   mapKiroCatalogModels(response.models, region)
+  // The parsed cache is shared with every reader, so build the new document
+  // instead of mutating it in place.
   const existingCache = readManagementCache()
-  const cache: ManagementModelsCache = existingCache ?? {
+  const cache: ManagementModelsCache = {
     version: KIRO_MANAGEMENT_CACHE_VERSION,
     source: KIRO_MANAGEMENT_CACHE_SOURCE,
-    regions: {},
+    regions: { ...existingCache?.regions },
   }
   cache.regions[region] = {
     region,

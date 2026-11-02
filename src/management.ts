@@ -7,7 +7,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { getKiroEndpoints } from './endpoints.ts'
@@ -380,16 +380,45 @@ export function parseManagementCache(raw: string): ManagementModelsCache | undef
   return { version: KIRO_MANAGEMENT_CACHE_VERSION, source: KIRO_MANAGEMENT_CACHE_SOURCE, regions }
 }
 
-/** Read the on-disk cache document, when present and valid. */
+/**
+ * The last parsed cache document, keyed by the file identity it was read from.
+ * Every model-list read, model resolution, and request consults the cache, so
+ * re-reading and re-parsing the file each time is wasted work; one stat
+ * decides whether the file changed. Another tool (pi-provider-kiro, a second
+ * harness process) rewriting the file changes its mtime or size, which
+ * invalidates this entry on the next read.
+ */
+let cacheMemo: { path: string; mtimeMs: number; size: number; value: ManagementModelsCache | undefined } | undefined
+
+/**
+ * Read the on-disk cache document, when present and valid. The result is
+ * shared between callers and must be treated as read-only.
+ */
 export function readManagementCache(): ManagementModelsCache | undefined {
   const cachePath = getKiroManagementCachePath()
-  if (!existsSync(cachePath)) return undefined
+  let mtimeMs: number
+  let size: number
   try {
-    return parseManagementCache(readFileSync(cachePath, 'utf-8'))
+    const stat = statSync(cachePath)
+    mtimeMs = stat.mtimeMs
+    size = stat.size
   } catch {
-    // Unreadable or unparseable cache file: behave as if no cache existed.
+    // No cache file (or an unreadable directory): behave as if no cache existed.
+    cacheMemo = undefined
     return undefined
   }
+  if (cacheMemo !== undefined && cacheMemo.path === cachePath && cacheMemo.mtimeMs === mtimeMs && cacheMemo.size === size) {
+    return cacheMemo.value
+  }
+  let value: ManagementModelsCache | undefined
+  try {
+    value = parseManagementCache(readFileSync(cachePath, 'utf-8'))
+  } catch {
+    // Unreadable or unparseable cache file: behave as if no cache existed.
+    value = undefined
+  }
+  cacheMemo = { path: cachePath, mtimeMs, size, value }
+  return value
 }
 
 /** Atomically replace the on-disk cache document. */
@@ -400,6 +429,9 @@ export function writeManagementCache(cache: ManagementModelsCache): void {
     writeFileSync(temporaryPath, JSON.stringify(cache, null, 2), 'utf-8')
     renameSync(temporaryPath, cachePath)
   } finally {
+    // The stat check would catch the change too; dropping the memo makes the
+    // next read unconditional rather than relying on mtime resolution.
+    cacheMemo = undefined
     rmSync(temporaryPath, { force: true })
   }
 }

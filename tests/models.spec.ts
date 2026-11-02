@@ -211,6 +211,30 @@ describe('llm-kiro models', () => {
     vi.unstubAllGlobals()
   })
 
+  it('reuses the parsed cache until another writer replaces the file', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('List-Available-Profiles')) {
+        return new Response(JSON.stringify({ profiles: [{ arn: 'arn:1' }] }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ models: [catalogModel('claude-sonnet-4.6')] }), { status: 200 })
+    }))
+    await updateKiroModelsCache('token', 'us-east-1')
+    const first = readManagementCache()
+    expect(readManagementCache()).toBe(first)
+    expect(getCachedModels('us-east-1').map(model => model.id)).toEqual(['claude-sonnet-4-6'])
+
+    // A second tool rewrites the shared file with a different catalog.
+    writeFileSync(getKiroManagementCachePath(), JSON.stringify({
+      ...first,
+      regions: { 'us-east-1': { region: 'us-east-1', fetchedAt: Date.now(), models: [catalogModel('glm-5'), catalogModel('brand-new-model')] } },
+    }))
+    expect(readManagementCache()).not.toBe(first)
+    expect(getCachedModels('us-east-1').map(model => model.id)).toEqual(['glm-5', 'brand-new-model'])
+    // Callers get their own array, so mutating it cannot corrupt the memo.
+    getCachedModels('us-east-1').pop()
+    expect(getCachedModels('us-east-1')).toHaveLength(2)
+  })
+
   it('distinguishes an absent catalog from the bootstrap fallback', () => {
     // getCachedModels falls back to bootstrap, so presence is judged separately.
     expect(hasAuthenticatedCatalog('no-such-region')).toBe(false)
