@@ -59,16 +59,6 @@ const OFF_ONLY_REASONING_EFFORTS = [
   { id: OFF_REASONING_EFFORT, name: 'Off' },
 ] as const
 
-/** Thinking budget (max_thinking_length marker) per effort level; unknown levels use the high budget. */
-const THINKING_BUDGET: Readonly<Record<string, number>> = {
-  low: 10_000,
-  medium: 20_000,
-  high: 30_000,
-  xhigh: 40_000,
-  max: 50_000,
-}
-const DEFAULT_THINKING_BUDGET = 30_000
-
 /** Validated connection facts for one operation; produced by the plugin's resolve step. */
 export interface KiroConnectionOptions {
   /** Kiro API region override; the credential's region wins when unset. */
@@ -327,7 +317,8 @@ export class KiroAdapter extends LlmAdapter {
         throw new LlmError('Kiro request aborted by caller', 'ABORTED', { cause: error })
       }
       if (error instanceof LlmError) throw error
-      throw new LlmError('Kiro API stream failed', 'TRANSPORT', { cause: error })
+      const detail = error instanceof Error && error.message ? `: ${error.message}` : ''
+      throw new LlmError(`Kiro API stream failed${detail}`, 'TRANSPORT', { cause: error })
     } finally {
       consumer.abort('Kiro stream consumer stopped')
       if (!exhausted && iterator.return !== undefined) {
@@ -364,18 +355,19 @@ export class KiroAdapter extends LlmAdapter {
     const contextWindow = model?.contextWindow ?? connection.defaultContextWindow
     const effortConfig = kiroEffortFor(wireModelId, model?.additionalModelRequestFieldsSchema)
     const effectiveEffort: string = options.reasoningEffort ?? connection.reasoningEffort
-    // Only a catalog model that declares reasoning gets thinking markers. This
+    // Only a catalog model that declares reasoning gets structured reasoning fields. This
     // matches reasoningInfo(), which offers an unknown model only 'off', so the
     // request never enables what the picker did not offer.
     const thinkingEnabled = effectiveEffort !== 'off'
       && connection.thinking !== 'disabled'
       && model?.reasoning === true
 
-    let system = options.system ?? ''
-    if (thinkingEnabled) {
-      const budget = THINKING_BUDGET[effectiveEffort] ?? DEFAULT_THINKING_BUDGET
-      system = `<thinking_mode>enabled</thinking_mode><max_thinking_length>${budget}</max_thinking_length>${system ? `\n${system}` : ''}`
-    }
+    // Reasoning is enabled through the structured `thinking`/`output_config`
+    // request fields below, not a system-prompt text marker: the
+    // <thinking_mode> marker makes the model echo literal <thinking>...</thinking>
+    // tags into visible content (verified against the live runtime), while the
+    // structured field turns on reasoning without leaking tags.
+    const system = options.system
 
     // Images resolve through the attachment store; their bytes travel as
     // base64 payloads on the current message. History images are stripped by

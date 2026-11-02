@@ -124,6 +124,36 @@ describe('llm-kiro adapter stream', () => {
     })
   })
 
+  it('folds the leading system message into the current user content on the wire', async () => {
+    const server = await serverWith([{ kind: 'eventstream', events: textEvents }])
+    await collect(adapter().stream(request({
+      reasoningEffort: 'off',
+      messages: [
+        { role: 'system', content: [{ type: 'text', text: 'SYSTEM_PROMPT_MARKER be brief' }] },
+        { role: 'user', content: [{ type: 'text', text: 'the question' }] },
+        { role: 'user', content: [{ type: 'text', text: 'runtime context' }] },
+      ],
+    })))
+    const body = server.requests[0] as Record<string, unknown>
+    const cs = body.conversationState as Record<string, unknown>
+    const content = (cs.currentMessage as any).userInputMessage.content as string
+    // The system prompt rides the current turn (the classic wire has no system
+    // field), every user message is merged, and nothing is stranded in history.
+    expect(content).toBe('SYSTEM_PROMPT_MARKER be brief\n\nthe question\n\nruntime context')
+    expect(cs.history).toBeUndefined()
+  })
+
+  it('records the transport failure cause in the error message', async () => {
+    // A connection reset before any HTTP response: the adapter must surface why,
+    // not a bare "Kiro API stream failed", so the session log can diagnose it.
+    const inst = adapter({ options: () => connection({ runtimeURL: 'http://127.0.0.1:1/generateAssistantResponse' }) })
+    let caught: any
+    try { await collect(inst.stream(request())) } catch (error) { caught = error }
+    expect(caught.code).toBe('TRANSPORT')
+    expect(caught.message).toMatch(/^Kiro API stream failed: .+/)
+    expect(caught.cause).toBeInstanceOf(Error)
+  })
+
   it('streams thinking and tool calls with a tool-calls finish', async () => {
     const server = await serverWith([
       { kind: 'eventstream', events: thinkingTextEvents },
@@ -137,18 +167,24 @@ describe('llm-kiro adapter stream', () => {
     expect(server.requests).toHaveLength(2)
   })
 
-  it('sends thinking markers and effort fields when reasoning is enabled', async () => {
+  it('enables reasoning through structured fields, not a content text marker', async () => {
+    // The <thinking_mode> text marker made the model echo literal
+    // <thinking>...</thinking> tags into visible content (verified live), so
+    // reasoning now rides only the structured additionalModelRequestFields.
     const server = await serverWith([{ kind: 'eventstream', events: textEvents }])
     await collect(adapter().stream(request({ reasoningEffort: 'max' })))
     const body = server.requests[0] as Record<string, unknown>
     const current = (body.conversationState as Record<string, unknown>).currentMessage as Record<string, unknown>
     const content = (current.userInputMessage as Record<string, unknown>).content as string
-    expect(content).toContain('<thinking_mode>enabled</thinking_mode>')
-    expect(content).toContain('<max_thinking_length>50000</max_thinking_length>')
-    expect(body.additionalModelRequestFields).toBeDefined()
+    expect(content).not.toContain('<thinking_mode>')
+    expect(content).not.toContain('<max_thinking_length>')
+    expect(body.additionalModelRequestFields).toMatchObject({
+      output_config: { effort: 'max' },
+      thinking: { type: 'adaptive' },
+    })
   })
 
-  it('omits thinking markers when the effort is off', async () => {
+  it('omits reasoning fields when the effort is off', async () => {
     const server = await serverWith([{ kind: 'eventstream', events: textEvents }])
     await collect(adapter().stream(request({ reasoningEffort: 'off' })))
     const body = server.requests[0] as Record<string, unknown>
@@ -218,6 +254,36 @@ describe('llm-kiro adapter stream', () => {
     await expect(collect(adapter().stream(request()))).rejects.toMatchObject({ code: 'CONTEXT_WINDOW_EXCEEDED' })
     await closeMockServers()
     const serverErr = await serverWith([{ kind: 'http-error', status: 500, body: 'boom' }])
+    await expect(collect(adapter().stream(request()))).rejects.toMatchObject({ code: 'SERVER' })
+  })
+
+  it('surfaces local history overflow as CONTEXT_WINDOW_EXCEEDED without a request', async () => {
+    const server = await serverWith([{ kind: 'eventstream', events: textEvents }])
+    const small = adapter({
+      options: () => connection({
+        models: [{ id: 'glm-5', kiroModelId: 'glm-5', name: 'GLM 5', reasoning: false, contextWindow: 1_000, maxTokens: 100, inputModalities: ['text'] }],
+      }),
+    })
+    await expect(collect(small.stream(request({
+      model: 'glm-5',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'x'.repeat(10_000) }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+        { role: 'user', content: [{ type: 'text', text: 'next' }] },
+      ],
+    })))).rejects.toMatchObject({ code: 'CONTEXT_WINDOW_EXCEEDED' })
+    expect(server.requests).toHaveLength(0)
+  })
+
+  it('classifies an in-stream context overflow instead of calling it SERVER', async () => {
+    await serverWith([{ kind: 'eventstream', events: [
+      { eventType: 'conversation', payload: { error: 'MODEL_CONTEXT_WINDOW_EXCEEDED', message: 'too long' } },
+    ] }])
+    await expect(collect(adapter().stream(request()))).rejects.toMatchObject({ code: 'CONTEXT_WINDOW_EXCEEDED' })
+    await closeMockServers()
+    await serverWith([{ kind: 'eventstream', events: [
+      { eventType: 'conversation', payload: { error: 'InternalServerException', message: 'boom' } },
+    ] }])
     await expect(collect(adapter().stream(request()))).rejects.toMatchObject({ code: 'SERVER' })
   })
 
@@ -380,7 +446,7 @@ describe('llm-kiro adapter stream', () => {
     await collect(adapter().stream(request({ reasoningEffort: 'medium' })))
     const body = server.requests[0] as Record<string, unknown>
     const current = (body.conversationState as Record<string, unknown>).currentMessage as Record<string, unknown>
-    expect((current.userInputMessage as Record<string, unknown>).content).toContain('<max_thinking_length>20000</max_thinking_length>')
+    expect((current.userInputMessage as Record<string, unknown>).content).not.toContain('<thinking_mode>')
     expect(body.additionalModelRequestFields).toMatchObject({ output_config: { effort: 'medium' } })
   })
 
