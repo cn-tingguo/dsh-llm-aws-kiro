@@ -263,17 +263,45 @@ describe('llm-kiro serialize', () => {
       ],
       source: { kind: 'user' },
     })
+    // Two consecutive user messages are one turn: both merge into the current
+    // message, text joined and the image carried; nothing is stranded in history.
     const body = serializeKiroRequest(request({
       messages: [user('before'), imageUser],
     }), 'claude-sonnet-4.6', undefined, 200000, encoded())
-    const history = body.conversationState.history!
-    // History image stripped, text retained
-    expect(history[0].userInputMessage!.images).toBeUndefined()
-    expect(history[0].userInputMessage!.content).toBe('before')
-    // Current message carries the image bytes
-    expect(body.conversationState.currentMessage.userInputMessage.images).toEqual([
-      { format: 'png', source: { bytes: 'AAAA' } },
-    ])
+    expect(body.conversationState.history).toBeUndefined()
+    const current = body.conversationState.currentMessage.userInputMessage
+    expect(current.content).toBe('before\n\nlook')
+    expect(current.images).toEqual([{ format: 'png', source: { bytes: 'AAAA' } }])
+  })
+
+  it('folds a leading system message into the first user turn and merges a multi-message turn', () => {
+    const system = createUserMessage({ content: [{ type: 'text', text: 'SYSTEM GUIDANCE' }], source: { kind: 'user' } }) as unknown as Message
+    const sys = { ...system, role: 'system' as const }
+    const body = serializeKiroRequest(request({
+      messages: [sys, user('the real question'), user('runtime context'), user('timestamp')],
+    }), 'claude-sonnet-4.6', undefined, 200000)
+    // No in-band system message survives as its own entry, and no user message
+    // is stranded in history.
+    expect(body.conversationState.history).toBeUndefined()
+    const content = body.conversationState.currentMessage.userInputMessage.content
+    expect(content).toBe('SYSTEM GUIDANCE\n\nthe real question\n\nruntime context\n\ntimestamp')
+  })
+
+  it('keeps a one-shot system string ahead of an in-history system prompt', () => {
+    const sys = { ...(createUserMessage({ content: [{ type: 'text', text: 'be terse' }], source: { kind: 'user' } }) as unknown as Message), role: 'system' as const }
+    const body = serializeKiroRequest(request({
+      messages: [sys, user('hi')],
+    }), 'claude-sonnet-4.6', 'ONE-SHOT', 200000)
+    const content = body.conversationState.currentMessage.userInputMessage.content
+    expect(content).toBe('ONE-SHOT\nbe terse\n\nhi')
+  })
+
+  it('fails an oversized single user turn as CONTEXT_WINDOW_EXCEEDED', () => {
+    let thrown: unknown
+    try {
+      serializeKiroRequest(request({ messages: [user('x'.repeat(10_000))] }), 'glm-5', undefined, 1_000)
+    } catch (error) { thrown = error }
+    expect(thrown).toMatchObject({ name: 'LlmError', code: 'CONTEXT_WINDOW_EXCEEDED' })
   })
 
   it('throws a context-length error when history exceeds the model budget', () => {
@@ -281,6 +309,16 @@ describe('llm-kiro serialize', () => {
     expect(() => serializeKiroRequest(request({
       messages: [user(bigText), user('now')],
     }), 'glm-5', undefined, 200_000)).toThrow('context_length_exceeded')
+  })
+
+  it('reports local history overflow as CONTEXT_WINDOW_EXCEEDED, not a retryable fault', () => {
+    let thrown: unknown
+    try {
+      serializeKiroRequest(request({ messages: [user('x'.repeat(10_000)), user('now')] }), 'glm-5', undefined, 1_000)
+    } catch (error) {
+      thrown = error
+    }
+    expect(thrown).toMatchObject({ name: 'LlmError', code: 'CONTEXT_WINDOW_EXCEEDED' })
   })
 
   it('drops genuinely empty assistant turns and thinking-only turns stay on the wire', () => {

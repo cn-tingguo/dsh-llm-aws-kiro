@@ -8,6 +8,7 @@
  * @module dsh-llm-kiro/serialize
  */
 
+import { CONTEXT_WINDOW_EXCEEDED_CODE, LlmError } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, Message, ToolSchema } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, ToolCallBlock } from '@deepseek-ai/dsh-llm'
 import type {
@@ -240,7 +241,7 @@ function toKiroAssistant(message: SerializableMessage): KiroAssistantResponseMes
  * the only place the Kiro wire can carry it.
  * @param messages - the harness conversation (results already relocated).
  * @param wireModelId - the exact wire model id.
- * @param system - the effective system prompt (thinking markers included).
+ * @param system - the effective system prompt.
  * @param encodedImages - encoded image payloads keyed by attachment id.
  * @returns the history entries, whether the system prompt was prepended, and
  * the index of the first message of the current group.
@@ -260,6 +261,22 @@ export function buildHistory(
   }
 
   let currentMsgStartIdx = messages.length - 1
+  // One harness turn can deliver several user messages in a row (the prompt, a
+  // runtime-context snapshot, a timestamp). Absorb that trailing user run so the
+  // serializer merges them into one current message instead of stranding the
+  // earlier ones in history. A tool result ends the run: it belongs with its
+  // issuing assistant, handled by the tool-result walk below.
+  while (currentMsgStartIdx > 0) {
+    const current = messages[currentMsgStartIdx]
+    const previous = messages[currentMsgStartIdx - 1]
+    if (current?.role === 'user' && previous?.role === 'user') {
+      currentMsgStartIdx--
+      continue
+    }
+    break
+  }
+  // Then walk back over a trailing tool-result carrier run (the current turn is
+  // the answer to the last assistant's tool calls).
   while (currentMsgStartIdx > 0) {
     const current = messages[currentMsgStartIdx]
     if (current === undefined || !isToolResultMessage(current)) break
@@ -453,11 +470,11 @@ export function prepareHistory(history: KiroHistoryEntry[]): KiroHistoryEntry[] 
  * profile resolution.
  * @param options - the harness request.
  * @param wireModelId - the exact wire model id.
- * @param system - the effective system prompt (thinking markers included).
+ * @param system - the effective system prompt.
  * @param contextWindow - the model's context capacity, for the history budget.
  * @param optionsImages - encoded image payloads keyed by attachment id.
  * @returns the wire request body.
- * @throws Error with a context_length_exceeded message when history exceeds the budget.
+ * @throws LlmError CONTEXT_WINDOW_EXCEEDED when history exceeds the budget.
  */
 /**
  * The slice of a request message this serializer reads.
@@ -470,6 +487,37 @@ export function prepareHistory(history: KiroHistoryEntry[]): KiroHistoryEntry[] 
  */
 type SerializableMessage = Message | { readonly role: 'user'; readonly content: Message['content'] }
 
+/**
+ * Pull a leading system-role message out of the conversation and fold its text
+ * into the effective system prompt.
+ *
+ * The harness delivers the system prompt as the first `role: 'system'` message
+ * (dsh-llm's agent-loop contract), not through `options.system`. The classic
+ * Kiro `generateAssistantResponse` wire has no system-prompt field — verified
+ * against runtime.us-east-1.kiro.dev, which rejects a top-level `systemPrompt`
+ * with REQUEST_BODY_INVALID and silently ignores one inside conversationState —
+ * so the only place it can ride is the first user turn's content, exactly as
+ * kiro-cli embeds its own agent instructions under `origin: KIRO_CLI`.
+ * @param messages - the conversation, possibly system-led.
+ * @param system - an explicit one-shot system prompt from the adapter.
+ * @returns the messages without the leading system message and the merged system text.
+ */
+export function foldLeadingSystemMessage(
+  messages: readonly SerializableMessage[],
+  system: string | undefined,
+): { messages: SerializableMessage[]; system: string | undefined } {
+  const first = messages[0]
+  if (first?.role !== 'system') return { messages: [...messages], system }
+  const leadText = blocksText(first.content)
+  // A one-shot `system` string stays first so the in-history system text
+  // follows it, matching the one-shot prepend order.
+  const merged = system && leadText
+    ? `${system}
+${leadText}`
+    : system || leadText || undefined
+  return { messages: messages.slice(1), system: merged }
+}
+
 export function serializeKiroRequest(
   options: GenerateOptions,
   wireModelId: string,
@@ -477,16 +525,12 @@ export function serializeKiroRequest(
   contextWindow: number,
   optionsImages?: ReadonlyMap<string, EncodedKiroImage>,
 ): KiroRequest {
-  const normalized = relocateDisplacedToolResults(options.messages as SerializableMessage[])
-  const { history: rawHistory, systemPrepended, currentMsgStartIdx } = buildHistory(normalized, wireModelId, system, optionsImages)
+  const folded = foldLeadingSystemMessage(options.messages as SerializableMessage[], system)
+  const effectiveSystem = folded.system
+  const normalized = relocateDisplacedToolResults(folded.messages)
+  const { history: rawHistory, systemPrepended, currentMsgStartIdx } = buildHistory(normalized, wireModelId, effectiveSystem, optionsImages)
   const history = prepareHistory(rawHistory)
   const dynamicHistoryLimit = Math.floor((contextWindow / HISTORY_LIMIT_CONTEXT_WINDOW) * HISTORY_LIMIT)
-  const size = JSON.stringify(history).length
-  if (size > dynamicHistoryLimit) {
-    throw new Error(
-      `Kiro API error: context_length_exceeded (local history ${size} chars exceeds the ${dynamicHistoryLimit}-char limit)`,
-    )
-  }
 
   const currentMessages = normalized.slice(currentMsgStartIdx)
   const firstMsg = currentMessages[0]
@@ -524,12 +568,21 @@ export function serializeKiroRequest(
   } else if (firstMsg && isToolResultMessage(firstMsg)) {
     collectToolResults(currentMessages)
   } else if (firstMsg?.role === 'user') {
-    const content = getContentText(firstMsg)
-    currentContent = system && !systemPrepended ? `${system}\n\n${content}` : content
-    const images = extractImages(firstMsg, encodedImages)
-    if (images.length > 0) currentImages = images
-    // Defensive: tool results trailing a plain user message still reach the payload.
-    collectToolResults(currentMessages.slice(1))
+    // A single turn can arrive as several consecutive user messages (the
+    // prompt, a runtime-context snapshot, a timestamp); merge them all so none
+    // is silently dropped into history, and keep every message's images.
+    const userTexts: string[] = []
+    for (const message of currentMessages) {
+      if (message.role !== 'user') break
+      const text = getContentText(message)
+      if (text.length > 0) userTexts.push(text)
+      const images = extractImages(message, encodedImages)
+      if (images.length > 0) currentImages = currentImages ? [...currentImages, ...images] : images
+    }
+    const content = userTexts.join('\n\n')
+    currentContent = effectiveSystem && !systemPrepended ? `${effectiveSystem}\n\n${content}` : content
+    // Tool results trailing the user messages still reach the payload.
+    collectToolResults(currentMessages)
   }
   if (currentContent === '' && currentToolResults.length === 0) currentContent = EMPTY_CONTENT_PLACEHOLDER
 
@@ -542,7 +595,7 @@ export function serializeKiroRequest(
     if (finalTools.length > 0) uimc.tools = finalTools
   }
 
-  return {
+  const request: KiroRequest = {
     conversationState: {
       chatTriggerType: 'MANUAL',
       agentTaskType: 'vibe',
@@ -561,4 +614,17 @@ export function serializeKiroRequest(
     profileArn: '',
     agentMode: 'vibe',
   }
+
+  // Measure the whole assembled body, not just history: a single oversized
+  // user turn (the merged current message) must fail the same way an oversized
+  // history does, with the overflow code the runtime itself uses, so the
+  // request never looks like a retryable transport fault.
+  const size = JSON.stringify(request.conversationState).length
+  if (size > dynamicHistoryLimit) {
+    throw new LlmError(
+      `Kiro API error: context_length_exceeded (local request ${size} chars exceeds the ${dynamicHistoryLimit}-char limit)`,
+      CONTEXT_WINDOW_EXCEEDED_CODE,
+    )
+  }
+  return request
 }
