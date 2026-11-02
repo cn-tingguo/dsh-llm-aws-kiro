@@ -8,6 +8,7 @@
 
 import { ToolCallId, EMPTY_RESPONSE_CODE, LlmError } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, FinishReason, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm'
+import { streamErrorCode, streamErrorText } from './stream.ts'
 import type { KiroStreamEvent } from './types.ts'
 
 /** Rough characters-per-token ratio for estimating output usage the runtime does not report. */
@@ -178,10 +179,8 @@ export async function* translate(events: AsyncIterable<KiroStreamEvent>, context
         break
       }
       case 'error': {
-        throw new LlmError(
-          `Kiro API stream error: ${event.data.message ? `${event.data.error}: ${event.data.message}` : event.data.error}`,
-          'SERVER',
-        )
+        const text = streamErrorText(event.data)
+        throw new LlmError(`Kiro API stream error: ${text}`, streamErrorCode(text))
       }
     }
   }

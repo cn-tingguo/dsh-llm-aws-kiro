@@ -166,6 +166,30 @@ function kiroUserAgent(): string {
   return attribution === undefined ? awsPrefix : `${awsPrefix} ${attribution}`
 }
 
+/**
+ * Map an in-stream error event to the harness failure code.
+ *
+ * The runtime reports some terminal conditions inside a 200 stream rather
+ * than as an HTTP status: context overflow arrives as the stop-reason
+ * `MODEL_CONTEXT_WINDOW_EXCEEDED`. Labelling every such event SERVER made the
+ * retry policy resend a request that cannot succeed, so the body markers the
+ * HTTP path already recognizes classify it here too; anything unrecognized
+ * stays SERVER.
+ * @param errorText - the event's error code and message joined.
+ * @returns the harness failure code.
+ */
+export function streamErrorCode(errorText: string): string {
+  if (isNonRetryableBodyError(errorText)) return 'QUOTA'
+  if (isTooBigError(0, errorText)) return 'CONTEXT_WINDOW_EXCEEDED'
+  if (isInvalidRequestError(errorText)) return 'INVALID_REQUEST'
+  return 'SERVER'
+}
+
+/** Render one in-stream error event as the message text it is classified by. */
+export function streamErrorText(data: { error: string; message?: string }): string {
+  return data.message ? `${data.error}: ${data.message}` : data.error
+}
+
 /** Map a non-2xx runtime response to the harness failure code. */
 function httpErrorCode(status: number, errorText: string): string {
   if (status === 401 || status === 403) return 'AUTH'
@@ -299,10 +323,8 @@ export async function* streamKiroEvents(options: KiroTransportOptions): AsyncGen
       if (result.done) return
       const event = result.value
       if (event.type === 'error') {
-        throw new LlmError(
-          `Kiro API stream error: ${event.data.message ? `${event.data.error}: ${event.data.message}` : event.data.error}`,
-          'SERVER',
-        )
+        const text = streamErrorText(event.data)
+        throw new LlmError(`Kiro API stream error: ${text}`, streamErrorCode(text))
       }
       yield event
     }

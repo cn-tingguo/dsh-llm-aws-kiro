@@ -104,6 +104,9 @@ describe('llm-kiro translate', () => {
       { type: 'error' as const, data: { error: 'boom', message: 'detail' } },
     ]
     await expect(collect(events)).rejects.toThrow('boom: detail')
+    await expect(collect(events)).rejects.toMatchObject({ code: 'SERVER' })
+    await expect(collect([{ type: 'error' as const, data: { error: 'MODEL_CONTEXT_WINDOW_EXCEEDED' } }]))
+      .rejects.toMatchObject({ code: 'CONTEXT_WINDOW_EXCEEDED' })
   })
 
   it('ignores followup prompts and reports empty responses as EMPTY_RESPONSE', async () => {

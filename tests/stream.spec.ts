@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isInvalidRequestError, isTooBigError, retryAfterMs } from '../src/stream.ts'
+import { isInvalidRequestError, isTooBigError, retryAfterMs, streamErrorCode, streamErrorText } from '../src/stream.ts'
 
 const responseWith = (headers: Record<string, string>): Response =>
   new Response(null, { status: 429, headers })
@@ -32,6 +32,15 @@ describe('llm-kiro error classification', () => {
     // The stop-reason spelling is recognized even when the status is not 400.
     expect(isTooBigError(422, 'MODEL_CONTEXT_WINDOW_EXCEEDED')).toBe(true)
     expect(isTooBigError(400, 'something else')).toBe(false)
+  })
+
+  it('classifies in-stream error events by their text', () => {
+    expect(streamErrorCode(streamErrorText({ error: 'MODEL_CONTEXT_WINDOW_EXCEEDED' }))).toBe('CONTEXT_WINDOW_EXCEEDED')
+    expect(streamErrorCode(streamErrorText({ error: 'ValidationException', message: 'Input is too long' }))).toBe('CONTEXT_WINDOW_EXCEEDED')
+    expect(streamErrorCode('MONTHLY_REQUEST_COUNT reached')).toBe('QUOTA')
+    expect(streamErrorCode('THINKING_SIGNATURE_INVALID')).toBe('INVALID_REQUEST')
+    expect(streamErrorCode('boom: detail')).toBe('SERVER')
+    expect(streamErrorText({ error: 'boom', message: 'detail' })).toBe('boom: detail')
   })
 
   it('recognizes malformed-request codes', () => {
