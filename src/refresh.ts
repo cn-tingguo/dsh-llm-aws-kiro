@@ -8,7 +8,7 @@
  */
 
 import type { KiroCredentials } from './types.ts'
-import { getKiroCliCredentials, getKiroCliCredentialsAllowExpired, getKiroIdeCredentials, refreshViaKiroCli, saveKiroCliCredentials, type KiroStorePaths } from './kiro-cli.ts'
+import { getKiroCliCredentials, getKiroCliCredentialsAllowExpired, getKiroIdeCredentials, refreshViaKiroCli, saveKiroCliCredentials, saveKiroIdeCredentials, type KiroStorePaths } from './kiro-cli.ts'
 
 /** Refresh lead time subtracted from access-token expiry at refresh time. */
 const EXPIRES_BUFFER_MS = 5 * 60 * 1000
@@ -155,11 +155,19 @@ export async function resolveUsableKiroCredential(paths?: KiroStorePaths): Promi
   const cliCreds = getKiroCliCredentials(paths)
   if (cliCreds) return cliCreds
 
-  // Layer 2: an expired IDE token with a refresh token — silent OIDC refresh.
+  // Layer 2: an expired IDE token with a refresh token — silent OIDC refresh,
+  // written back so the next request (and the IDE) sees the new generation.
   const expiredIdeCreds = getKiroIdeCredentials(true, paths)
   if (expiredIdeCreds) {
     try {
-      return await refreshKiroToken(expiredIdeCreds)
+      const refreshed = await refreshKiroToken(expiredIdeCreds)
+      saveKiroIdeCredentials(
+        refreshed,
+        expiredIdeCreds.refresh.split('|')[0] ?? '',
+        refreshed.expires + EXPIRES_BUFFER_MS,
+        paths,
+      )
+      return refreshed
     } catch {
       // Fall through to the kiro-cli refresh layer
     }
@@ -199,11 +207,16 @@ export async function recoverKiroCredential(
   const stored = getKiroCliCredentials(paths) ?? getKiroIdeCredentials(false, paths)
   if (stored && stored.access !== rejected.access) return stored
 
-  const expired = getKiroCliCredentialsAllowExpired(paths) ?? getKiroIdeCredentials(true, paths)
+  const expiredCli = getKiroCliCredentialsAllowExpired(paths)
+  const expired = expiredCli ?? getKiroIdeCredentials(true, paths)
   if (expired) {
     try {
       const refreshed = await refreshKiroToken(expired)
-      saveKiroCliCredentials(refreshed, paths)
+      if (expiredCli !== undefined) {
+        saveKiroCliCredentials(refreshed, paths)
+      } else {
+        saveKiroIdeCredentials(refreshed, expired.refresh.split('|')[0] ?? '', refreshed.expires + EXPIRES_BUFFER_MS, paths)
+      }
       return refreshed
     } catch {
       // Fall through to the kiro-cli owned refresh

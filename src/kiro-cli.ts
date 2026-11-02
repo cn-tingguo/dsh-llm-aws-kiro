@@ -10,7 +10,7 @@
  */
 
 import { execFile, execSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir, platform } from 'node:os'
 import { join } from 'node:path'
@@ -316,6 +316,49 @@ export function getKiroIdeCredentials(allowExpired: boolean, paths?: KiroStorePa
   } catch {
     // Malformed or incomplete token row: treat it as no credential at all.
     return undefined
+  }
+}
+
+/**
+ * Write a refreshed IDE credential back into the Kiro IDE token file.
+ *
+ * Refreshing rotates the refresh token, so leaving the file untouched would
+ * strand the IDE on a refresh token the server no longer honors and make this
+ * provider refresh again on every request. Only the token fields change;
+ * every other field the IDE wrote is kept. The write is skipped when the file
+ * no longer holds the refresh token this credential was refreshed from,
+ * because then the IDE rotated it meanwhile and its copy is newer.
+ * @param creds - the refreshed credential facts.
+ * @param previousRefreshToken - the raw refresh token the refresh consumed.
+ * @param expiresAtMs - the real (unbuffered) access-token expiry.
+ * @param paths - optional path overrides.
+ * @returns whether the file was updated.
+ */
+export function saveKiroIdeCredentials(
+  creds: KiroCredentials,
+  previousRefreshToken: string,
+  expiresAtMs: number,
+  paths?: KiroStorePaths,
+): boolean {
+  const ssoCacheDir = paths?.ssoCacheDir ?? join(homedir(), '.aws', 'sso', 'cache')
+  const tokenPath = kiroIdeTokenPath(ssoCacheDir)
+  const temporaryPath = `${tokenPath}.${process.pid}.${Date.now()}.tmp`
+  try {
+    const tokenData = JSON.parse(readTokenFile(tokenPath)) as Record<string, unknown>
+    if (tokenData.refreshToken !== previousRefreshToken) return false
+    tokenData.accessToken = creds.access
+    tokenData.refreshToken = creds.refresh.split('|')[0] ?? previousRefreshToken
+    tokenData.expiresAt = new Date(expiresAtMs).toISOString()
+    // Same-directory rename keeps the replacement atomic, and 0600 matches the
+    // permissions the IDE gives its own token file.
+    writeFileSync(temporaryPath, JSON.stringify(tokenData, null, 2), { encoding: 'utf-8', mode: 0o600 })
+    renameSync(temporaryPath, tokenPath)
+    return true
+  } catch {
+    // Write-back is best effort: the refreshed credential still serves this request.
+    return false
+  } finally {
+    rmSync(temporaryPath, { force: true })
   }
 }
 

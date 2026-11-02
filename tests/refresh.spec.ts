@@ -2,7 +2,7 @@
  * Token refresh tests with a stubbed fetch: OIDC and desktop endpoints, the
  * layered resolution chain, and 403 recovery.
  */
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -207,6 +207,69 @@ describe('llm-kiro refresh', () => {
     // dbPath that does not exist so the kiro-cli layers are skipped.
     const credential = await resolveUsableKiroCredential(isolated(join(dir, 'no-such-db.sqlite3'), ssoCacheDir))
     expect(credential).toMatchObject({ access: 'refreshed-ide' })
+  })
+
+  it('writes a refreshed IDE token back so the next request does not refresh again', async () => {
+    const { dir } = await fixtureStore()
+    const ssoCacheDir = join(dir, 'sso-cache')
+    const tokenPath = join(ssoCacheDir, 'kiro-auth-token.json')
+    await writeFile(tokenPath, JSON.stringify({
+      accessToken: 'expired-ide',
+      refreshToken: 'ide-refresh',
+      expiresAt: new Date(Date.now() - 60_000).toISOString(),
+      clientIdHash: 'h1',
+      region: 'us-east-1',
+      provider: 'Enterprise',
+      authMethod: 'IdC',
+    }))
+    await writeFile(join(ssoCacheDir, 'h1.json'), JSON.stringify({ clientId: 'ide-client', clientSecret: 'ide-secret' }))
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      accessToken: 'refreshed-ide',
+      refreshToken: 'rotated',
+      expiresIn: 3600,
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const paths = isolated(join(dir, 'no-such-db.sqlite3'), ssoCacheDir)
+
+    expect(await resolveUsableKiroCredential(paths)).toMatchObject({ access: 'refreshed-ide' })
+    const stored = JSON.parse(await readFile(tokenPath, 'utf-8')) as Record<string, string>
+    expect(stored).toMatchObject({
+      accessToken: 'refreshed-ide',
+      refreshToken: 'rotated',
+      clientIdHash: 'h1',
+      provider: 'Enterprise',
+      authMethod: 'IdC',
+    })
+    // The stored expiry is the real one, about an hour out.
+    expect(new Date(stored.expiresAt!).getTime()).toBeGreaterThan(Date.now() + 55 * 60_000)
+    expect((await stat(tokenPath)).mode & 0o777).toBe(0o600)
+
+    // The second request reads the fresh token instead of refreshing again.
+    expect(await resolveUsableKiroCredential(paths)).toMatchObject({ access: 'refreshed-ide' })
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  it('leaves an IDE token the IDE rotated meanwhile untouched', async () => {
+    const { dir } = await fixtureStore()
+    const ssoCacheDir = join(dir, 'sso-cache')
+    const tokenPath = join(ssoCacheDir, 'kiro-auth-token.json')
+    await writeFile(tokenPath, JSON.stringify({
+      accessToken: 'expired-ide',
+      refreshToken: 'ide-refresh',
+      expiresAt: new Date(Date.now() - 60_000).toISOString(),
+    }))
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      // The IDE rotates its own token while this refresh is in flight.
+      await writeFile(tokenPath, JSON.stringify({
+        accessToken: 'ide-own',
+        refreshToken: 'ide-own-refresh',
+        expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      }))
+      return new Response(JSON.stringify({ accessToken: 'refreshed-ide', refreshToken: 'rotated', expiresIn: 3600 }), { status: 200 })
+    }))
+    await resolveUsableKiroCredential(isolated(join(dir, 'no-such-db.sqlite3'), ssoCacheDir))
+    const stored = JSON.parse(await readFile(tokenPath, 'utf-8')) as Record<string, string>
+    expect(stored.accessToken).toBe('ide-own')
   })
 
   it('refreshes an expired kiro-cli token and writes it back', async () => {
