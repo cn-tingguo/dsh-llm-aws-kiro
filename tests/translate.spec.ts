@@ -21,7 +21,7 @@ describe('llm-kiro translate', () => {
     expect(chunks).toContainEqual({ type: 'text-delta', index: 0, text: 'hello' })
     expect(chunks).toContainEqual({ type: 'text-delta', index: 0, text: ' world' })
     expect(chunks).toContainEqual({ type: 'block-end', index: 0, block: { type: 'text', text: 'hello world' } })
-    expect(chunks).toContainEqual({ type: 'usage', usage: { inputTokens: 24, outputTokens: 2 } })
+    expect(chunks).toContainEqual({ type: 'usage', usage: { inputTokens: 24, outputTokens: 2, totalTokens: 26 } })
     expect(chunks).toContainEqual({ type: 'finish', reason: { kind: 'stop' } })
   })
 
@@ -120,6 +120,16 @@ describe('llm-kiro translate', () => {
     })
     const usage = chunks.find(chunk => (chunk as { type: string }).type === 'usage') as { usage: { inputTokens: number } }
     expect(usage.usage.inputTokens).toBe(6000)
+  })
+
+  it('reports totalTokens only when the provider reports both token halves', async () => {
+    const measured = await collect([{ type: 'content', data: 'abcd' }, { type: 'usage', data: { inputTokens: 24, outputTokens: 2 } }])
+    const measuredUsage = measured.find(chunk => (chunk as { type: string }).type === 'usage') as { usage: { totalTokens?: number } }
+    expect(measuredUsage.usage.totalTokens).toBe(26)
+
+    const estimated = await collect([{ type: 'contextUsage', data: { contextUsagePercentage: 1 } }, { type: 'content', data: 'abcd' }, { type: 'usage', data: {} }])
+    const estimatedUsage = estimated.find(chunk => (chunk as { type: string }).type === 'usage') as { usage: { totalTokens?: number } }
+    expect(estimatedUsage.usage.totalTokens).toBeUndefined()
   })
 
   it('emits usage before the finish chunk', async () => {

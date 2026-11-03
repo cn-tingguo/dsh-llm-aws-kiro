@@ -302,6 +302,43 @@ describe('llm-kiro adapter stream', () => {
     await expect(collect(adapter().stream(request()))).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
   })
 
+  it('surfaces the server retry hint and provider request id on a retryable failure', async () => {
+    // dsh-llm-retry prefers providerRetryAfterMs over its own backoff guess, and
+    // the request id is what makes a backend failure correlatable.
+    await serverWith([{
+      kind: 'http-error',
+      status: 429,
+      body: 'ThrottlingException',
+      headers: { 'x-amz-retry-after': '4200', 'x-amzn-requestid': 'rid-throttle-1' },
+    }])
+    const failure = await collect(adapter().stream(request())).catch(error => error)
+    expect(failure.code).toBe('RATE_LIMIT')
+    expect(failure.failure.providerRetryAfterMs).toBe(4200)
+    expect(failure.failure.requestId).toBe('rid-throttle-1')
+  })
+
+  it('omits the retry hint when the server names none', async () => {
+    await serverWith([{ kind: 'http-error', status: 500, body: 'boom', headers: { 'x-amzn-requestid': 'rid-2' } }])
+    const failure = await collect(adapter().stream(request())).catch(error => error)
+    expect(failure.failure.providerRetryAfterMs).toBeUndefined()
+    expect(failure.failure.requestId).toBe('rid-2')
+  })
+
+  it('binds model metadata and dispatch to one generation in prepareCall', async () => {
+    const server = await serverWith([{ kind: 'eventstream', events: textEvents }])
+    // The connection thunk flips after preparation: a bound call must keep serving
+    // the generation it prepared with, not re-read the changed one.
+    let calls = 0
+    const bound = adapter({
+      options: () => connection(calls++ === 0 ? {} : { runtimeURL: 'http://127.0.0.1:1/unreachable' }),
+    })
+    const prepared = await bound.prepareCall('kiro', 'claude-sonnet-4-6')
+    expect(prepared.model.context?.contextWindow).toBe(200000)
+    const chunks = await collect(prepared.stream(request()))
+    expect(chunks).toContainEqual({ type: 'finish', reason: { kind: 'stop' } })
+    expect(server.requests).toHaveLength(1)
+  })
+
   it('maps caller abort to ABORTED', async () => {
     const controller = new AbortController()
     const server = await serverWith([{ kind: 'eventstream', events: [{ eventType: 'conversation', payload: { content: 'x' } }], stallAfterMs: 60_000 }])

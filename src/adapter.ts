@@ -20,6 +20,7 @@ import type {
   LlmProviderInfo,
   LlmResolvedModelInfo,
   LlmModelReasoningInfo,
+  PreparedAdapterCall,
   ResolvedRetryPolicy,
   StreamChunk,
   ContentBlock,
@@ -245,26 +246,54 @@ export class KiroAdapter extends LlmAdapter {
     return Promise.resolve(servedKiroModels(connection).map(model => modelInfo(provider, model)))
   }
 
-  override resolveModel(
-    provider: string,
-    model: string,
-    _signal?: AbortSignal,
-  ): Promise<LlmResolvedModelInfo> {
-    const connection = this.config.options()
+  /** Resolve one model entirely from one captured connection generation. */
+  private resolvedModel(connection: KiroConnectionOptions, provider: string, model: string): LlmResolvedModelInfo {
     const configured = catalogEntry(servedKiroModels(connection), model)
     const contextWindow = configured?.contextWindow ?? connection.defaultContextWindow
-    return Promise.resolve({
+    return {
       ...configured === undefined
         ? { provider, id: model, name: model, inputModalities: ['text' as const] }
         : modelInfo(provider, configured),
       context: { contextWindow },
       defaultMaxTokens: configured?.maxTokens ?? connection.maxTokens,
       reasoning: reasoningInfo(connection, configured),
-    })
+    }
+  }
+
+  override resolveModel(
+    provider: string,
+    model: string,
+    _signal?: AbortSignal,
+  ): Promise<LlmResolvedModelInfo> {
+    return Promise.resolve(this.resolvedModel(this.config.options(), provider, model))
+  }
+
+  override async prepareCall(
+    provider: string,
+    model: string,
+    _signal?: AbortSignal,
+  ): Promise<PreparedAdapterCall> {
+    // Bind one generation: the same connection facts and the same resolved model
+    // metadata for this call's dispatch. Re-reading `options()` at stream time
+    // would let a mid-flight settings or credential change pair one generation's
+    // capabilities with another generation's endpoint.
+    const connection = this.config.options()
+    const resolved = this.resolvedModel(connection, provider, model)
+    return {
+      model: resolved,
+      stream: (options: GenerateOptions) => this.run(options, connection),
+    }
   }
 
   async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-    const connection = this.config.options()
+    yield* this.run(options, this.config.options())
+  }
+
+  /** Dispatch one request under already-resolved connection facts. */
+  private async * run(
+    options: GenerateOptions,
+    connection: KiroConnectionOptions,
+  ): AsyncIterable<StreamChunk> {
     const hasImages = options.messages.some(message => contentHasImage(message.content))
     let attachments: AttachmentStore | undefined
     if (hasImages) {

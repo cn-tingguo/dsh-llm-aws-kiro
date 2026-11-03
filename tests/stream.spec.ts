@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isInvalidRequestError, isTooBigError, retryAfterMs, streamErrorCode, streamErrorText } from '../src/stream.ts'
+import { isInvalidRequestError, isTooBigError, providerRequestId, retryAfterMs, streamErrorCode, streamErrorText } from '../src/stream.ts'
 
 const responseWith = (headers: Record<string, string>): Response =>
   new Response(null, { status: 429, headers })
@@ -17,10 +17,19 @@ describe('llm-kiro stream retry-after', () => {
     expect(retryAfterMs(responseWith({ 'x-amz-retry-after': '999999' }), 30_000)).toBe(30_000)
   })
 
+  it('reads the provider request id from either header spelling', () => {
+    expect(providerRequestId(new Response(null, { headers: { 'x-amzn-requestid': 'rid-1' } }))).toBe('rid-1')
+    expect(providerRequestId(new Response(null, { headers: { 'x-amzn-request-id': 'rid-2' } }))).toBe('rid-2')
+    // Absent or blank headers yield nothing rather than an empty id.
+    expect(providerRequestId(new Response(null))).toBeUndefined()
+    expect(providerRequestId(new Response(null, { headers: { 'x-amzn-requestid': '  ' } }))).toBeUndefined()
+  })
+
   it('ignores a missing or malformed header', () => {
     expect(retryAfterMs(responseWith({}), 30_000)).toBeUndefined()
     expect(retryAfterMs(responseWith({ 'x-amz-retry-after': 'soon' }), 30_000)).toBeUndefined()
     expect(retryAfterMs(responseWith({ 'x-amz-retry-after': '-5' }), 30_000)).toBeUndefined()
+    expect(retryAfterMs(responseWith({ 'x-amz-retry-after': '0' }), 30_000)).toBeUndefined()
   })
 })
 

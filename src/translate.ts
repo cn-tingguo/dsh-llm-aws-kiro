@@ -90,9 +90,17 @@ export async function* translate(events: AsyncIterable<KiroStreamEvent>, context
     // The runtime's usage event arrives empty in practice, so a missing output
     // count is estimated from what this stream emitted instead of reported as 0.
     const emittedChars = order.reduce((total, block) => total + block.text.length, 0)
+    const inputTokens = usageEvent?.inputTokens ?? Math.round((contextUsagePercentage ?? 0) / 100 * contextWindow)
+    const outputTokens = usageEvent?.outputTokens ?? Math.ceil(emittedChars / CHARS_PER_TOKEN)
+    // Kiro normally exposes credits and context percentage rather than token
+    // totals on this runtime path. Preserve a total only when both halves came
+    // from one provider usage event; never sum our own estimates.
     const usage: TokenUsage = {
-      inputTokens: usageEvent?.inputTokens ?? Math.round((contextUsagePercentage ?? 0) / 100 * contextWindow),
-      outputTokens: usageEvent?.outputTokens ?? Math.ceil(emittedChars / CHARS_PER_TOKEN),
+      inputTokens,
+      outputTokens,
+      ...(usageEvent?.inputTokens !== undefined && usageEvent.outputTokens !== undefined
+        ? { totalTokens: usageEvent.inputTokens + usageEvent.outputTokens }
+        : {}),
     }
     yield { type: 'usage', usage }
     yield { type: 'finish', reason }

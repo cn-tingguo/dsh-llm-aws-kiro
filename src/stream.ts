@@ -7,11 +7,20 @@
  * @module dsh-llm-kiro/stream
  */
 
-import { APP_IDENTITY, LlmError, attributionHeaders } from '@deepseek-ai/dsh-llm'
+import { APP_IDENTITY, LlmError, ProviderRequestId, attributionHeaders } from '@deepseek-ai/dsh-llm'
 import { getKiroEndpoints } from './endpoints.ts'
 import { decodeKiroEventStream } from './eventstream.ts'
 import { describeKiroUsage, fetchKiroUsageLimits } from './management.ts'
 import type { KiroCredentials, KiroRequest, KiroStreamEvent } from './types.ts'
+
+/**
+ * Largest server-requested delay forwarded to the outer retry executor.
+ *
+ * `dsh-llm-retry` ignores a hint above the policy's own `maxDelayMs` and falls
+ * back to local backoff, so this ceiling only stops a hostile header from being
+ * carried around; the policy still makes the final call.
+ */
+const RETRY_AFTER_CEILING_MS = 120_000
 
 /** How many times a capacity rejection is retried with backoff before giving up. */
 const CAPACITY_MAX_RETRIES = 3
@@ -117,7 +126,9 @@ export function retryAfterMs(response: Response, maxMs: number): number | undefi
   const raw = response.headers.get('x-amz-retry-after') ?? response.headers.get('retry-after')
   if (raw === null) return undefined
   const parsed = Number(raw.trim())
-  if (!Number.isFinite(parsed) || parsed < 0) return undefined
+  // LlmError.providerRetryAfterMs must be strictly positive; zero means
+  // "retry immediately", which is equivalent to no usable server hint.
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined
   return Math.min(parsed, maxMs)
 }
 
@@ -164,6 +175,22 @@ function kiroUserAgent(): string {
   // merging it here keeps one header the backend already accepts.
   const attribution = attributionHeaders()['user-agent']
   return attribution === undefined ? awsPrefix : `${awsPrefix} ${attribution}`
+}
+
+/**
+ * The provider request id this response carries, when the runtime names one.
+ *
+ * The Kiro runtime answers with `x-amzn-requestid` on both success and failure
+ * (verified against runtime.us-east-1.kiro.dev). Carrying it on the LlmError
+ * lets a failure be correlated with the backend instead of arriving as an
+ * anonymous "stream failed".
+ * @param response - the HTTP response.
+ * @returns the request id, or undefined when the header is absent or empty.
+ */
+export function providerRequestId(response: Response): string | undefined {
+  const raw = response.headers.get('x-amzn-requestid') ?? response.headers.get('x-amzn-request-id')
+  const id = raw?.trim()
+  return id !== undefined && id.length > 0 ? id : undefined
 }
 
 /**
@@ -287,7 +314,16 @@ export async function* streamKiroEvents(options: KiroTransportOptions): AsyncGen
         // Keep the bare quota error when the usage lookup is unavailable.
       }
     }
-    throw new LlmError(message, code, { status: response.status })
+    const requestId = providerRequestId(response)
+    // The outer retry executor (`dsh-llm-retry`) prefers this hint over its own
+    // exponential guess, but only when it fits the policy ceiling; pass the raw
+    // clamped value and let the policy decide.
+    const providerRetryAfterMs = retryAfterMs(response, RETRY_AFTER_CEILING_MS)
+    throw new LlmError(message, code, {
+      status: response.status,
+      ...(providerRetryAfterMs !== undefined ? { providerRetryAfterMs } : {}),
+      ...(requestId !== undefined ? { requestId: ProviderRequestId(requestId) } : {}),
+    })
   }
 
   if (!response.ok || !response.body) {
