@@ -109,17 +109,25 @@ describe('llm-kiro translate', () => {
       .rejects.toMatchObject({ code: 'CONTEXT_WINDOW_EXCEEDED' })
   })
 
-  it('ignores followup prompts and reports empty responses as EMPTY_RESPONSE', async () => {
+  it('ignores followup prompts and ends the turn when the runtime answers with no content', async () => {
+    // A completed response that carried nothing is the model finishing its turn
+    // without words, not a broken transport: retrying it made the harness burn
+    // five attempts and fail the turn outright.
     const chunks = await collect([
       { type: 'followupPrompt', data: 'want more?' },
       { type: 'contextUsage', data: { contextUsagePercentage: 3 } },
     ])
+    expect(chunks).toContainEqual({ type: 'finish', reason: { kind: 'stop' } })
+    const usage = chunks.find(chunk => (chunk as { type: string }).type === 'usage') as { usage: { inputTokens: number } }
+    expect(usage.usage.inputTokens).toBe(6000)
+  })
+
+  it('reports EMPTY_RESPONSE when the runtime delivered no events at all', async () => {
+    const chunks = await collect([])
     expect(chunks).toContainEqual({
       type: 'finish',
       reason: { kind: 'error', failure: expect.objectContaining({ code: EMPTY_RESPONSE_CODE }) },
     })
-    const usage = chunks.find(chunk => (chunk as { type: string }).type === 'usage') as { usage: { inputTokens: number } }
-    expect(usage.usage.inputTokens).toBe(6000)
   })
 
   it('reports totalTokens only when the provider reports both token halves', async () => {

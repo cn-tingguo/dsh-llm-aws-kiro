@@ -106,7 +106,13 @@ export async function* translate(events: AsyncIterable<KiroStreamEvent>, context
     yield { type: 'finish', reason }
   }
 
+  // Whether the runtime reported anything at all for this turn. A completion
+  // with usage but no content is a model that finished the turn with nothing to
+  // say — not a broken stream — and must not be retried as a failure.
+  let sawAnyEvent = false
+
   for await (const event of events) {
+    sawAnyEvent = true
     switch (event.type) {
       case 'contextUsage': {
         contextUsagePercentage = event.data.contextUsagePercentage
@@ -196,10 +202,20 @@ export async function* translate(events: AsyncIterable<KiroStreamEvent>, context
   yield* closeAllOpen()
 
   if (!textBlock && !reasoningBlock && !sawAnyToolCalls) {
-    yield* finish({
-      kind: 'error',
-      failure: { message: 'model returned a completed response with no content', code: EMPTY_RESPONSE_CODE },
-    })
+    if (!sawAnyEvent) {
+      // Nothing arrived: the runtime gave us an empty stream, which the retry
+      // policy should see as a transport-shaped failure.
+      yield* finish({
+        kind: 'error',
+        failure: { message: 'model returned a completed response with no content', code: EMPTY_RESPONSE_CODE },
+      })
+      return
+    }
+    // The runtime did answer — it just carried no content. Some models end a
+    // turn that way after a tool result (they consider the work done), and
+    // reporting that as EMPTY_RESPONSE made the harness retry five times and
+    // fail the turn. An empty assistant message ends the turn instead.
+    yield* finish({ kind: 'stop' })
     return
   }
   yield* finish(emittedToolCalls > 0 ? { kind: 'tool-calls' } : { kind: 'stop' })
