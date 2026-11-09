@@ -47,6 +47,21 @@ function closeBlock(block: OpenBlock): ContentBlock {
  * @param contextWindow - the model's context capacity, for the input estimate.
  * @returns the harness chunks.
  */
+/** Caller-owned judgement about a mid-stream failure. */
+export interface TranslateSalvage {
+  /**
+   * Whether a failure that arrived after output may be treated as the end of the
+   * turn instead of a failed one.
+   *
+   * Only the caller knows what a failure means: a transport drop is worth
+   * salvaging, a caller abort or an idle timeout is not. Returning false keeps
+   * the error on its normal path.
+   * @param error - the failure that escaped the event source.
+   * @returns true to finish with what already arrived.
+   */
+  readonly allowed: (error: unknown) => boolean
+}
+
 export async function* translate(events: AsyncIterable<KiroStreamEvent>, contextWindow: number): AsyncGenerator<StreamChunk> {
   let nextIndex = 0
   let textBlock: OpenBlock | undefined
@@ -110,6 +125,8 @@ export async function* translate(events: AsyncIterable<KiroStreamEvent>, context
   // with usage but no content is a model that finished the turn with nothing to
   // say — not a broken stream — and must not be retried as a failure.
   let sawAnyEvent = false
+  /** Transport failure message the guard converted after output arrived. */
+  let interrupted: string | undefined
 
   for await (const event of events) {
     sawAnyEvent = true
@@ -196,6 +213,13 @@ export async function* translate(events: AsyncIterable<KiroStreamEvent>, context
         const text = streamErrorText(event.data)
         throw new LlmError(`Kiro API stream error: ${text}`, streamErrorCode(text))
       }
+      case 'streamInterrupted': {
+        // Only the adapter's guard emits this, and only after output arrived:
+        // the turn's answer is already on the wire, so finishing with it is
+        // strictly better than failing a turn the model completed.
+        interrupted = event.data.message
+        break
+      }
     }
   }
 
@@ -218,5 +242,8 @@ export async function* translate(events: AsyncIterable<KiroStreamEvent>, context
     yield* finish({ kind: 'stop' })
     return
   }
+  // `interrupted` means the closing frame never arrived; the blocks that did
+  // arrive are complete enough to keep, so the turn ends normally.
+  void interrupted
   yield* finish(emittedToolCalls > 0 ? { kind: 'tool-calls' } : { kind: 'stop' })
 }

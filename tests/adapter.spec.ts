@@ -257,6 +257,27 @@ describe('llm-kiro adapter stream', () => {
     await expect(collect(adapter().stream(request()))).rejects.toMatchObject({ code: 'SERVER' })
   })
 
+  it('keeps the answer when the transport drops after output', async () => {
+    // The model already said what it had to say; the closing frame is lost. The
+    // turn finishes with the text instead of becoming a retried failure.
+    await serverWith([{
+      kind: 'close-early',
+      events: [
+        { eventType: 'conversation', payload: { content: 'partial answer' } },
+      ],
+    }])
+    const chunks = await collect(adapter().stream(request())) as { type: string; reason?: { kind: string } }[]
+    expect(chunks.some(chunk => chunk.type === 'text-delta')).toBe(true)
+    const finish = chunks.find(chunk => chunk.type === 'finish')
+    expect(finish?.reason?.kind).toBe('stop')
+  })
+
+  it('still fails when the transport drops before any output', async () => {
+    await serverWith([{ kind: 'close-early', events: [] }])
+    await expect(collect(adapter().stream(request())))
+      .rejects.toMatchObject({ code: 'TRANSPORT' })
+  })
+
   it('surfaces local history overflow as CONTEXT_WINDOW_EXCEEDED without a request', async () => {
     const server = await serverWith([{ kind: 'eventstream', events: textEvents }])
     const small = adapter({

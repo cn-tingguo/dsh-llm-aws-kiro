@@ -125,6 +125,14 @@ export type KiroStreamEvent =
   | { type: 'followupPrompt'; data: string }
   | { type: 'usage'; data: { inputTokens?: number; outputTokens?: number; credits?: number } }
   | { type: 'error'; data: { error: string; message?: string } }
+  /**
+   * The event source broke mid-stream.
+   *
+   * The adapter's guard turns a transport failure into this event only when the
+   * turn already produced output; anything else keeps its own error path. It is
+   * appended by the guard, never decoded from the wire.
+   */
+  | { type: 'streamInterrupted'; data: { message: string } }
 
 /** One model entry of the authenticated management catalog. */
 export interface KiroCatalogModel {

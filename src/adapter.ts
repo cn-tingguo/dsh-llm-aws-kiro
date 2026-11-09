@@ -42,6 +42,8 @@ import { resolveKiroProfileArn, KiroManagementHttpError } from './management.ts'
 import { serializeKiroRequest, type EncodedKiroImage } from './serialize.ts'
 import { streamKiroEvents } from './stream.ts'
 import { translate } from './translate.ts'
+import type { TranslateSalvage } from './translate.ts'
+import type { KiroStreamEvent } from './types.ts'
 import type { KiroCredentials } from './types.ts'
 import type { KiroStorePaths } from './kiro-cli.ts'
 
@@ -323,6 +325,16 @@ export class KiroAdapter extends LlmAdapter {
       connection,
       attachments,
       () => { watchdog.pulse() },
+      {
+        // A transport drop after output is not a failed turn: the model said
+        // what it had to say and the closing frame was lost. Caller aborts and
+        // idle timeouts keep their own outcomes, so they stay fatal here.
+        allowed: error => {
+          if (options.signal?.aborted === true) return false
+          if (timeoutOf(watchdog.signal, STREAM_IDLE_TIMEOUT_CODE) !== undefined) return false
+          return !(error instanceof LlmError)
+        },
+      },
     )[Symbol.asyncIterator]()
     let exhausted = false
     try {
@@ -360,12 +372,46 @@ export class KiroAdapter extends LlmAdapter {
     }
   }
 
+  /**
+   * Wrap the runtime's event stream so a mid-stream transport failure becomes a
+   * terminal {@link KiroStreamEvent} instead of an exception.
+   *
+   * An exception escaping the source has already been classified by the caller
+   * as a retryable failure, which is wrong once the model has produced output:
+   * the harness would retry a turn the model finished. The guard only converts
+   * failures the caller marked salvageable, and only after output; everything
+   * else is rethrown on its original path.
+   * @param events - the runtime's decoded events.
+   * @param salvage - the caller's judgement about this failure.
+   * @param producedOutput - whether any content has been forwarded to the caller.
+   * @returns the events, with a terminal interruption event when applicable.
+   */
+  private async * guardEvents(
+    events: AsyncIterable<KiroStreamEvent>,
+    salvage: TranslateSalvage | undefined,
+  ): AsyncIterable<KiroStreamEvent> {
+    let producedOutput = false
+    try {
+      for await (const event of events) {
+        if (event.type === 'content' || event.type === 'thinkingText' || event.type === 'toolUse') {
+          producedOutput = true
+        }
+        yield event
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (salvage === undefined || !salvage.allowed(error) || !producedOutput) throw error
+      yield { type: 'streamInterrupted', data: { message } }
+    }
+  }
+
   private async * request(
     options: GenerateOptions,
     signal: AbortSignal,
     connection: KiroConnectionOptions,
     attachments: AttachmentStore | undefined,
     onActivity: () => void,
+    salvage?: TranslateSalvage,
   ): AsyncIterable<StreamChunk> {
     // One credential resolution per stream call; an in-flight stream never
     // observes a configuration change and the next call re-resolves.
@@ -456,7 +502,7 @@ export class KiroAdapter extends LlmAdapter {
             ?? new URL('generateAssistantResponse', getKiroEndpoints(region).runtime).toString(),
         })
         onActivity()
-        yield* translate(events, contextWindow)
+        yield* translate(this.guardEvents(events, salvage), contextWindow)
         return
       } catch (error: unknown) {
         const auth403 = error instanceof LlmError && error.failure.status === 403
