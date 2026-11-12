@@ -119,6 +119,11 @@ describe('llm-kiro real dynamic composition', () => {
     const configurable = ctx.llm.listConfigurableProviders().find(provider => provider.provider === 'kiro')
     expect(configurable?.settingsNs).toBe(NS)
     expect(ctx.llm.listProviders().map(provider => provider.id)).toContain('kiro')
+    // The subagent plugin's model-discovery tool reads exactly this: the route's
+    // advertised catalog, which must be non-empty and owned by the route.
+    const advertised = await ctx.llm.listModels('kiro')
+    expect(advertised.map(model => model.id)).toContain('claude-sonnet-4-6')
+    expect(advertised.every(model => model.provider === 'kiro')).toBe(true)
     await assemble(ctx, { model: 'claude-sonnet-4-6', messages: [] })
     expect(server.headers[0]?.authorization).toBe('Bearer boot-token')
   })
