@@ -1,6 +1,6 @@
 {
   "name": "dsh-llm-kiro-local",
-  "version": "0.2.2-local.3",
+  "version": "0.2.2-local.4",
   "description": "Kiro (AWS CodeWhisperer/Q successor) provider for the DeepSeek Harness: ambient credential pickup, OAuth token refresh, and the Kiro runtime/management API",
   "type": "module",
   "license": "MIT",

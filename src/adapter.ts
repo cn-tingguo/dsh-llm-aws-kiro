@@ -424,7 +424,12 @@ export class KiroAdapter extends LlmAdapter {
     try {
       wireModelId = resolveKiroModelId(options.model)
     } catch (error) {
-      throw new LlmError(`llm-kiro: ${(error as Error).message}`, 'INVALID_REQUEST', { cause: error })
+      // The resolver already prefixes its own diagnostics, so only add the
+      // prefix when the message does not carry it: a doubled one reads as two
+      // separate faults in the transcript.
+      const detail = (error as Error).message
+      const message = detail.startsWith('llm-kiro:') ? detail : `llm-kiro: ${detail}`
+      throw new LlmError(message, 'INVALID_REQUEST', { cause: error })
     }
     const model = catalogEntry(servedKiroModels(connection), options.model)
     const contextWindow = model?.contextWindow ?? connection.defaultContextWindow

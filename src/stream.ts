@@ -11,6 +11,7 @@ import { APP_IDENTITY, LlmError, ProviderRequestId, attributionHeaders } from '@
 import { getKiroEndpoints } from './endpoints.ts'
 import { decodeKiroEventStream } from './eventstream.ts'
 import { describeKiroUsage, fetchKiroUsageLimits } from './management.ts'
+import type { BuiltinLlmFailureCode } from '@deepseek-ai/dsh-llm'
 import type { KiroCredentials, KiroRequest, KiroStreamEvent } from './types.ts'
 
 /**
@@ -205,7 +206,7 @@ export function providerRequestId(response: Response): string | undefined {
  * @param errorText - the event's error code and message joined.
  * @returns the harness failure code.
  */
-export function streamErrorCode(errorText: string): string {
+export function streamErrorCode(errorText: string): BuiltinLlmFailureCode {
   if (isNonRetryableBodyError(errorText)) return 'QUOTA'
   if (isTooBigError(0, errorText)) return 'CONTEXT_WINDOW_EXCEEDED'
   if (isInvalidRequestError(errorText)) return 'INVALID_REQUEST'
@@ -218,7 +219,7 @@ export function streamErrorText(data: { error: string; message?: string }): stri
 }
 
 /** Map a non-2xx runtime response to the harness failure code. */
-function httpErrorCode(status: number, errorText: string): string {
+function httpErrorCode(status: number, errorText: string): BuiltinLlmFailureCode {
   if (status === 401 || status === 403) return 'AUTH'
   if (isNonRetryableBodyError(errorText)) return 'QUOTA'
   if (isTooBigError(status, errorText)) return 'CONTEXT_WINDOW_EXCEEDED'
