@@ -36,7 +36,7 @@ import {
   selectableKiroEfforts,
   type KiroReasoningEffort,
 } from './effort.ts'
-import { kiroEffortFor, resolveKiroModelId, servedKiroModels } from './models.ts'
+import { findKiroModel, kiroEffortFor, resolveKiroModelId, servedKiroModels } from './models.ts'
 import type { KiroModel } from './models.ts'
 import { resolveKiroProfileArn, KiroManagementHttpError } from './management.ts'
 import { serializeKiroRequest, type EncodedKiroImage } from './serialize.ts'
@@ -218,10 +218,7 @@ function reasoningInfo(connection: KiroConnectionOptions, model: KiroModel | und
   }
 }
 
-/** The model metadata for one exact model id: catalog entry or undefined. */
-function catalogEntry(models: readonly KiroModel[], model: string): KiroModel | undefined {
-  return models.find(entry => entry.id === model)
-}
+const catalogEntry = findKiroModel
 
 /**
  * The Kiro adapter: one instance serves every model id under the `kiro`
@@ -254,8 +251,13 @@ export class KiroAdapter extends LlmAdapter {
     const contextWindow = configured?.contextWindow ?? connection.defaultContextWindow
     return {
       ...configured === undefined
-        ? { provider, id: model, name: model, inputModalities: ['text' as const] }
+        ? { name: model, inputModalities: ['text' as const] }
         : modelInfo(provider, configured),
+      // The catalog may know the same model under the other version spelling;
+      // the route the caller asked for is still this id, and the runtime rejects
+      // resolved metadata whose id does not match the request.
+      provider,
+      id: model,
       context: { contextWindow },
       defaultMaxTokens: configured?.maxTokens ?? connection.maxTokens,
       reasoning: reasoningInfo(connection, configured),

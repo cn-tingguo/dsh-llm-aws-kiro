@@ -177,6 +177,24 @@ export function toHarnessModelId(kiroModelId: string): string {
 }
 
 /**
+ * Find one model in a served catalog, accepting either version spelling.
+ *
+ * The catalog is keyed by the harness id (`claude-sonnet-5-5`), while a
+ * deployment may write the wire spelling (`claude-sonnet-5.5`). Matching only the
+ * exact string silently downgraded such a route to the default context window and
+ * an `off`-only effort ladder, which also suppressed the structured reasoning
+ * fields the request sends.
+ * @param models - the served catalog.
+ * @param model - the requested id, in either spelling.
+ * @returns the catalog entry, or undefined when the model is not served.
+ */
+export function findKiroModel(models: readonly KiroModel[], model: string): KiroModel | undefined {
+  const direct = models.find(entry => entry.id === model)
+  if (direct !== undefined) return direct
+  const normalized = toHarnessModelId(model)
+  return normalized === model ? undefined : models.find(entry => entry.id === normalized)
+}
+/**
  * Humanize a dashed id into a display name.
  *
  * Harness ids encode a version's decimal point as a dash

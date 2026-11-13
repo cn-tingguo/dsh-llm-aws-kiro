@@ -18,6 +18,7 @@ vi.mock('node:os', async () => {
 
 import {
   bootstrapKiroModels,
+  findKiroModel,
   getCachedModels,
   isCacheStale,
   KIRO_MODEL_IDS,
@@ -425,4 +426,26 @@ describe('llm-kiro models', () => {
     expect(orderKiroModels(merged).map(entry => entry.id)).toEqual(['auto', 'claude-opus-5', 'glm-5'])
   })
 
+})
+describe('findKiroModel', () => {
+  const models = [
+    { id: 'claude-sonnet-5-5', kiroModelId: 'claude-sonnet-5.5', name: 'Sonnet 5.5', reasoning: true, contextWindow: 1_000_000, maxTokens: 64000 },
+    { id: 'claude-haiku-5-5', kiroModelId: 'claude-haiku-5.5', name: 'Haiku 5.5', reasoning: true, contextWindow: 1_000_000, maxTokens: 64000 },
+  ] as never
+
+  it('finds a model by its harness id', () => {
+    expect(findKiroModel(models, 'claude-sonnet-5-5')?.id).toBe('claude-sonnet-5-5')
+  })
+
+  it('finds the same model written in the wire spelling', () => {
+    // A deployment may copy the dotted id from Kiro docs; without this the route
+    // silently ran on the default context window with reasoning turned off.
+    expect(findKiroModel(models, 'claude-sonnet-5.5')?.id).toBe('claude-sonnet-5-5')
+    expect(findKiroModel(models, 'claude-haiku-5.5')?.id).toBe('claude-haiku-5-5')
+  })
+
+  it('reports an unknown model as absent', () => {
+    expect(findKiroModel(models, 'claude-retired-9')).toBeUndefined()
+    expect(findKiroModel(models, 'claude-retired-9.9')).toBeUndefined()
+  })
 })
